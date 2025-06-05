@@ -27,4 +27,4 @@ Or to produce a six sided low poly strip that twists through 1/6th of a rotation
     twist = 60 # Rotate around 1/6th of a rotation, i.e. one side
 ```
 
-![alt text](https://github.com/tonycoupland/mobius3d/blob/master/examples/6side24step.jpg?raw=true)
+![alt text](https://github.com/tonycoupland/mobius3d/blob/main/examples/6side24step.jpg?raw=true)
