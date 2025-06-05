@@ -14,7 +14,7 @@ For example to produce a three sided smooth strip that twists through 1/3rd of a
     twist = 120 # Rotate around 1/3rd of a rotation, i.e. one side
 ```
 
-![alt text](https://github.com/tonycoupland/mobius3d/blob/master/examples/3side360step.jpg?raw=true)
+![alt text](https://github.com/tonycoupland/mobius3d/blob/main/examples/3side360step.jpg?raw=true)
 
 
 Or to produce a six sided low poly strip that twists through 1/6th of a rotation as it completes, use the following
