@@ -56,6 +56,25 @@
 
   let mesh;
 
+  function updateURLFromInputs() {
+    const params = new URLSearchParams();
+    ['sides', 'polygonRadius', 'ringRadius', 'segments', 'twist'].forEach(id => {
+      const val = document.getElementById(id).value;
+      params.set(id, val);
+    });
+    const newURL = `${window.location.pathname}?${params.toString()}`;
+    history.replaceState(null, '', newURL);
+  }
+
+  function applyInputsFromURL() {
+    const params = new URLSearchParams(window.location.search);
+    ['sides', 'polygonRadius', 'ringRadius', 'segments', 'twist'].forEach(id => {
+      if (params.has(id)) {
+        document.getElementById(id).value = params.get(id);
+      }
+    });
+  }
+
   function createPolygonPoints(sides, radius) {
     const points = [];
     for (let i = 0; i < sides; i++) {
@@ -145,6 +164,8 @@
     const geom = generateGeometry(sides, polyRadius, ringRadius, segments, twist);
     mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0x44ccff, flatShading: true, side: THREE.DoubleSide }));
     scene.add(mesh);
+
+    updateURLFromInputs();
   }
 
   document.getElementById('generate').addEventListener('click', regenerate);
@@ -152,7 +173,7 @@
   document.querySelectorAll('#controls input').forEach(input => {
     input.addEventListener('input', regenerate);
   });
-  
+
   document.getElementById('download').addEventListener('click', () => {
     const exporter = new STLExporter();
     const stlString = exporter.parse(mesh);
@@ -162,7 +183,8 @@
     a.download = 'twisted_ring.stl';
     a.click();
   });
-
+  
+  applyInputsFromURL();
   regenerate();
 
   function animate() {
