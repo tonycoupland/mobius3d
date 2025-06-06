@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Twisted Ring Generator</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; background: #111; color: #eee; }
+    #controls { padding: 1em; background: #222; display: flex; gap: 1em; flex-wrap: wrap; align-items: center; }
+    label { display: flex; flex-direction: column; font-size: 0.9em; }
+    input { width: 60px; margin-top: 4px; }
+    canvas { display: block; }
+    #generate { padding: 0.5em 1em; background: #4c50af; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    #download { padding: 0.5em 1em; background: #4caf50; color: white; border: none; border-radius: 4px; cursor: pointer; }
+  </style>
+</head>
+<body>
+<div id="controls">
+  <label>Sides<input type="number" id="sides" value="6"></label>
+  <label>Polygon Radius (mm)<input type="number" id="polygonRadius" value="6" step="0.1"></label>
+  <label>Ring Radius (mm)<input type="number" id="ringRadius" value="40" step="0.1"></label>
+  <label>Segments<input type="number" id="segments" value="16"></label>
+  <label>Twists (sides)<input type="number" id="twist" value="5"></label>
+  <button id="generate">Generate</button>
+  <button id="download">Download STL</button>
+</div>
+<canvas id="three-canvas"></canvas>
+<script type="importmap">
+  {
+      "imports": {
+          "three": "https://threejs.org/build/three.module.js",
+          "three/addons/": "https://threejs.org/examples/jsm/"
+      }
+  }
+</script>
+<script type="module">
+  import * as THREE from 'three'
+  import {OrbitControls} from 'three/addons/controls/OrbitControls.js'
+  import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+  // import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+  // import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+  // import { STLExporter } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/exporters/STLExporter.js';
+
+  const canvas = document.getElementById('three-canvas');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, -120, 100);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  const light1 = new THREE.DirectionalLight(0xffffff, 1);
+  light1.position.set(5, 5, 10);
+  scene.add(light1);
+  scene.add(new THREE.AmbientLight(0x444444));
+
+  let mesh;
+
+  function createPolygonPoints(sides, radius) {
+    const points = [];
+    for (let i = 0; i < sides; i++) {
+      const angle = (i / sides) * 2 * Math.PI;
+      points.push(new THREE.Vector3(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius,
+        0
+      ));
+    }
+    return points;
+  }
+
+  function generateGeometry(sides, polyRadius, ringRadius, segments, twists) {
+    const geometry = new THREE.BufferGeometry();
+    const vertices = [];
+
+    const polygons = [];
+    const twistRad = THREE.MathUtils.degToRad(360 / sides * twists);
+
+    for (let i = 0; i < segments; i++) {
+      const t = i / segments;
+      const angle = t * 2 * Math.PI;
+      const twist = t * twistRad;
+
+      let points = createPolygonPoints(sides, polyRadius);
+
+      // Apply twist
+      const twistMatrix = new THREE.Matrix4().makeRotationZ(twist);
+      points.forEach(p => p.applyMatrix4(twistMatrix));
+
+      // Rotate polygon to face outwards
+      const outAngle = angle;
+      const rotY = new THREE.Matrix4().makeRotationX(Math.PI / 2);
+      const rotZ = new THREE.Matrix4().makeRotationZ(outAngle);
+      const faceMatrix = new THREE.Matrix4().multiply(rotZ).multiply(rotY);
+      points.forEach(p => p.applyMatrix4(faceMatrix));
+
+      // Translate outward
+      const cx = Math.cos(angle) * ringRadius;
+      const cy = Math.sin(angle) * ringRadius;
+      const translation = new THREE.Vector3(cx, cy, 0);
+      points.forEach(p => p.add(translation));
+
+      polygons.push(points);
+    }
+
+    // Add face triangles
+    var twisted_offset = 0;
+    for (let i = 0; i < segments; i++) {
+      const polyA = polygons[i];
+      const polyB = polygons[(i + 1) % segments];
+      if ( i == (segments-1) ) { // special case for last poly... this depends on how much it twisted
+        twisted_offset = twists;
+      }
+
+      for (let j = 0; j < sides; j++) {
+        const a1 = polyA[j];
+        const a2 = polyA[(j + 1) % sides];
+        const b1 = polyB[(j + twisted_offset) % sides];
+        const b2 = polyB[(j + twisted_offset + 1) % sides];
+        vertices.push(
+          a1.x, a1.y, a1.z,
+          a2.x, a2.y, a2.z,
+          b2.x, b2.y, b2.z,
+
+          a1.x, a1.y, a1.z,
+          b2.x, b2.y, b2.z,
+          b1.x, b1.y, b1.z
+        );
+      }
+    }
+
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.computeVertexNormals();
+    return geometry;
+  }
+
+  function regenerate() {
+    const sides = parseInt(document.getElementById('sides').value);
+    const polyRadius = parseFloat(document.getElementById('polygonRadius').value);
+    const ringRadius = parseFloat(document.getElementById('ringRadius').value);
+    const segments = parseInt(document.getElementById('segments').value);
+    const twist = parseFloat(document.getElementById('twist').value);
+
+    if (mesh) scene.remove(mesh);
+    const geom = generateGeometry(sides, polyRadius, ringRadius, segments, twist);
+    mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0x44ccff, flatShading: true, side: THREE.DoubleSide }));
+    scene.add(mesh);
+  }
+
+  document.getElementById('generate').addEventListener('click', regenerate);
+  // Automatically regenerate on any input change
+  document.querySelectorAll('#controls input').forEach(input => {
+    input.addEventListener('input', regenerate);
+  });
+  
+  document.getElementById('download').addEventListener('click', () => {
+    const exporter = new STLExporter();
+    const stlString = exporter.parse(mesh);
+    const blob = new Blob([stlString], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'twisted_ring.stl';
+    a.click();
+  });
+
+  regenerate();
+
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+</script>
+</body>
+</html>
