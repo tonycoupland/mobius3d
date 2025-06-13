@@ -20,6 +20,7 @@
   <label>Ring Radius (mm)<input type="number" id="ringRadius" value="40" step="0.1"></label>
   <label>Segments<input type="number" id="segments" value="16"></label>
   <label>Twists (sides)<input type="number" id="twist" value="5"></label>
+  <label>Polygon Corner Smoothing (%)<input type="number" id="cornerSmoothing" value="20"></label>
   <button id="generate">Generate</button>
   <button id="download">Download STL</button>
 </div>
@@ -55,10 +56,11 @@
   scene.add(new THREE.AmbientLight(0x444444));
 
   let mesh;
+  let wireframe;
 
   function updateURLFromInputs() {
     const params = new URLSearchParams();
-    ['sides', 'polygonRadius', 'ringRadius', 'segments', 'twist'].forEach(id => {
+    ['sides', 'polygonRadius', 'ringRadius', 'segments', 'twist', 'cornerSmoothing'].forEach(id => {
       const val = document.getElementById(id).value;
       params.set(id, val);
     });
@@ -68,7 +70,7 @@
 
   function applyInputsFromURL() {
     const params = new URLSearchParams(window.location.search);
-    ['sides', 'polygonRadius', 'ringRadius', 'segments', 'twist'].forEach(id => {
+    ['sides', 'polygonRadius', 'ringRadius', 'segments', 'twist', 'cornerSmoothing'].forEach(id => {
       if (params.has(id)) {
         document.getElementById(id).value = params.get(id);
       }
@@ -88,7 +90,71 @@
     return points;
   }
 
-  function generateGeometry(sides, polyRadius, ringRadius, segments, twists) {
+
+  function createRoundedPolygonPoints(n, radius, cornerRadius, segmentsPerCorner) {
+    const angleStep = (Math.PI * 2) / n;
+    const basePoints = [];
+
+    // Step 1: Generate raw polygon vertices
+    for (let i = 0; i < n; i++) {
+      const angle = i * angleStep;
+      basePoints.push(new THREE.Vector2(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius
+      ));
+    }
+
+    const finalPoints = [];
+
+    for (let i = 0; i < n; i++) {
+      const prev = basePoints[(i - 1 + n) % n];
+      const curr = basePoints[i];
+      const next = basePoints[(i + 1) % n];
+
+      const v1 = prev.clone().sub(curr).normalize();  // Incoming edge
+      const v2 = next.clone().sub(curr).normalize();  // Outgoing edge
+
+      // Interior bisector
+      const bisector = v1.clone().add(v2).normalize();
+
+      // Compute angle between edges
+      const angle = Math.acos(v1.dot(v2));
+      const halfAngle = angle / 2;
+
+      // Distance from corner to arc center
+      const distanceToCenter = cornerRadius / Math.sin(halfAngle);
+
+      // Arc center is in direction of bisector, inward
+      const arcCenter = curr.clone().add(bisector.multiplyScalar(distanceToCenter));
+
+      // Compute tangent points on each edge
+      const tangentLength = cornerRadius / Math.tan(halfAngle);
+      const startTangent = curr.clone().add(v1.multiplyScalar(tangentLength));
+      const endTangent = curr.clone().add(v2.multiplyScalar(tangentLength));
+
+      // Compute start/end angles for arc
+      const startAngle = Math.atan2(startTangent.y - arcCenter.y, startTangent.x - arcCenter.x);
+      const endAngle = Math.atan2(endTangent.y - arcCenter.y, endTangent.x - arcCenter.x);
+
+      // Ensure correct CCW direction
+      let deltaAngle = endAngle - startAngle;
+      if (deltaAngle < 0) deltaAngle += Math.PI * 2;
+
+      for (let j = 0; j <= segmentsPerCorner; j++) {
+        const t = j / segmentsPerCorner;
+        const theta = startAngle + t * deltaAngle;
+        const x = arcCenter.x + cornerRadius * Math.cos(theta);
+        const y = arcCenter.y + cornerRadius * Math.sin(theta);
+        finalPoints.push(new THREE.Vector3(x, y, 0));
+      }
+    }
+
+    return finalPoints;
+  }
+
+
+
+  function generateGeometry(sides, polyRadius, ringRadius, segments, twists, cornerRadius, segmentsPerCorner) {
     const geometry = new THREE.BufferGeometry();
     const vertices = [];
 
@@ -100,7 +166,7 @@
       const angle = t * 2 * Math.PI;
       const twist = t * twistRad;
 
-      let points = createPolygonPoints(sides, polyRadius);
+      let points = createRoundedPolygonPoints(sides, polyRadius, cornerRadius, segmentsPerCorner);
 
       // Apply twist
       const twistMatrix = new THREE.Matrix4().makeRotationZ(twist);
@@ -122,29 +188,59 @@
       polygons.push(points);
     }
 
-    // Add face triangles
-    var twisted_offset = 0;
-    for (let i = 0; i < segments; i++) {
-      const polyA = polygons[i];
-      const polyB = polygons[(i + 1) % segments];
-      if ( i == (segments-1) ) { // special case for last poly... this depends on how much it twisted
-        twisted_offset = twists;
+
+    var fillSides = true;
+    var fillPolys = false;
+
+    if ( fillPolys){
+      // Draw triangles for each poly...
+      for (let i = 0; i < segments; i++) {
+        var shapePoints = polygons[i];
+        // Calculate center point (assumes polygon lies in XY plane)
+        const center = new THREE.Vector3(0, 0, 0);
+        shapePoints.forEach(p => center.add(p));
+        center.divideScalar(shapePoints.length);
+
+        // Triangulate the polygon using a fan from the center
+        for (let i = 0; i < shapePoints.length; i++) {
+          const a = shapePoints[i];
+          const b = shapePoints[(i + 1) % shapePoints.length];
+
+          vertices.push(
+            center.x, center.y, center.z,
+            a.x, a.y, a.z,
+            b.x, b.y, b.z
+          );
+        }
       }
+    }
 
-      for (let j = 0; j < sides; j++) {
-        const a1 = polyA[j];
-        const a2 = polyA[(j + 1) % sides];
-        const b1 = polyB[(j + twisted_offset) % sides];
-        const b2 = polyB[(j + twisted_offset + 1) % sides];
-        vertices.push(
-          a1.x, a1.y, a1.z,
-          a2.x, a2.y, a2.z,
-          b2.x, b2.y, b2.z,
+    // Add triangles between pairs of points
+    if (fillSides){
+      var twisted_offset = 0;
+      var pointsPerPoly = polygons[0].length;
+      for (let i = 0; i < segments; i++) {
+        const polyA = polygons[i];
+        const polyB = polygons[(i + 1) % segments];
+        if ( i == (segments-1) ) { // special case for last poly... this depends on how much it twisted
+          twisted_offset = (twists*segmentsPerCorner);
+        }
 
-          a1.x, a1.y, a1.z,
-          b2.x, b2.y, b2.z,
-          b1.x, b1.y, b1.z
-        );
+        for (let j = 0; j < pointsPerPoly; j++) {
+          const a1 = polyA[j];
+          const a2 = polyA[(j + 1) % pointsPerPoly];
+          const b1 = polyB[(j + twisted_offset) % pointsPerPoly];
+          const b2 = polyB[(j + twisted_offset + 1) % pointsPerPoly];
+          vertices.push(
+            a1.x, a1.y, a1.z,
+            a2.x, a2.y, a2.z,
+            b2.x, b2.y, b2.z,
+
+            a1.x, a1.y, a1.z,
+            b2.x, b2.y, b2.z,
+            b1.x, b1.y, b1.z
+          );
+        }
       }
     }
 
@@ -159,12 +255,28 @@
     const ringRadius = parseFloat(document.getElementById('ringRadius').value);
     const segments = parseInt(document.getElementById('segments').value);
     const twist = parseFloat(document.getElementById('twist').value);
-
+    const cornerSmoothing = parseFloat(document.getElementById('cornerSmoothing').value);
+    
     if (mesh) scene.remove(mesh);
-    const geom = generateGeometry(sides, polyRadius, ringRadius, segments, twist);
-    mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0x44ccff, flatShading: true, side: THREE.DoubleSide }));
+    const geom = generateGeometry(sides, polyRadius, ringRadius, segments, twist, cornerSmoothing/100 * polyRadius, 20);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x44ccff,
+      flatShading: true,
+      side: THREE.DoubleSide
+    });
+    mesh = new THREE.Mesh(geom, material);
     scene.add(mesh);
 
+    // Wireframe
+    var showWireFrame = false;
+    if ( showWireFrame){
+      if (wireframe) scene.remove(wireframe);
+      wireframe = new THREE.LineSegments(
+        new THREE.WireframeGeometry(geom),
+        new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 1 }) // you can change the color
+      );
+      scene.add(wireframe);
+    }
     updateURLFromInputs();
   }
 
