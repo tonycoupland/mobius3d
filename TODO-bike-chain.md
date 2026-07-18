@@ -236,14 +236,25 @@ Four rounds of feedback after the first working render:
       [modules/styles/chainStyle.js](modules/styles/chainStyle.js)). This is
       what prompted reverting Decision 3's "hide Smoothness" call and
       removing the now-unused `irrelevantCommonControlIds` mechanism.
-- [x] **Added a Link Thickness control.** `createLinkGeometry`'s ring is now
-      an ellipse rather than a circle away from its coplanar ends: a "wide"
-      axis (local Y) still tapers from `loopRadius` to `waistRadius`, but a
-      separate "thin" axis (local Z) tapers from `loopRadius` down to
-      `linkThickness / 2`, flattening the neck into a plate-like cross
-      section instead of a round rod. Defaults `thickness` to
-      `waistRadius * 2` when omitted, which reproduces the old round shape
-      exactly (kept the existing round-waist tests passing unchanged).
+- [x] **Added a Link Thickness control — revised once, after it turned out
+      to have no visible effect.** First attempt made the ring an ellipse in
+      the Y-Z plane (a "wide" axis tapering `loopRadius`→`waistRadius`, a
+      separate "thin" axis tapering `loopRadius`→`thickness/2`). That was
+      wrong: local Z (the "thin" axis) turned out to be nearly parallel to
+      the link's own travel direction (`dot ≈ -0.99`, confirmed numerically)
+      — not perpendicular to a visible "face" — so shrinking it barely
+      showed up against the tube's much longer overall span, and it also
+      distorted the *outline* (which should stay a plain circle, the same
+      shape that caps the round bearing) rather than adding real depth.
+      Fixed by treating thickness as a genuinely separate dimension along
+      the local *pin axis* (X, previously unused by the ring at all):
+      `createLinkGeometry` now builds two parallel copies of the same
+      circular loopRadius→waistRadius outline (`buildLinkFaceRings`),
+      offset `±thickness/2` along local X, stitches each as its own face,
+      and adds a rim strip connecting them at every length step so the link
+      reads as a solid slab instead of two separate floating sheets.
+      `thickness` has no default any more (it's a required shape parameter
+      now, like `loopRadius`/`waistRadius`, not an optional refinement).
 - [x] **New "Bike Chain" settings section.** All of chain's `ownedControlIds`
       (`linkCount`, `pinLength`, `bearingRadius`, `bearingLength`,
       `linkWaistRadius`, `linkThickness`, `linkInnerSeparation`,
@@ -273,13 +284,29 @@ Four rounds of feedback after the first working render:
       `angleTo` test showing the closing gap's orientation delta now
       matches every other gap's, where the old code's delta was more than
       2x larger for a 180°-total-twist example.
-- [x] `npm test` — 29/29 passing. Visually verified via the local
+- [x] **Tied the link taper's own resolution to Smoothness too.** After the
+      thickness fix landed, the links still looked visibly more faceted
+      than the pins/bearings at the same Smoothness value. Cause: pins/
+      bearings have a *constant* radius along their length, so only
+      `radialSegments` (the circular resolution) affects how round they
+      look — but links *taper* (loopRadius → waistRadius → loopRadius)
+      along their length, so that taper is itself approximated by
+      `lengthSegments` discrete steps, which stayed hardcoded at 8
+      regardless of Smoothness. Combined with `flatShading: true` on the
+      material, each of those 8 steps rendered as a visible flat facet.
+      Fixed by setting `lengthSegments: radialSegments` in
+      `createChainGeometry` — one Smoothness value now drives both the
+      circular roundness and the taper's resolution.
+- [x] `npm test` — 30/30 passing. Visually verified via the local
       `python3 -m http.server` harness: Smoothness re-enabled and visibly
-      rounds the pins/bearings/links; links read as flatter plates with the
-      default thickness; the "Bike Chain" section shows only when that
-      style is active and the panel is otherwise clean for the other
-      styles; a twist=1 loop shows no more visually "over-twisted" link
-      near the seam; STL export still succeeds.
+      rounds the pins/bearings *and* the link taper (checked at Smoothness
+      6 vs 64 — clearly faceted vs. clearly smooth); links read as genuine
+      flat plates with visible depth, and a bounding-box check confirmed
+      thickness actually grows the geometry's extent along the pin axis
+      (9.5mm → 12.5mm going from thickness 0.2 to 5); the "Bike Chain"
+      section shows only when that style is active; a twist=1 loop shows no
+      more visually "over-twisted" link near the seam; STL export still
+      succeeds.
 
 ### Phase 4 — parameters, UI, config persistence
 - [x] `linkCount`, `pinLength`, `bearingRadius`, `bearingLength`,

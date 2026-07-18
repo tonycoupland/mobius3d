@@ -173,27 +173,33 @@ test('createBearingGeometry produces one merged cylinder per link, centred on it
   assertStationCylindersCentered(transforms, position, 0, vertsPerCylinder, bearingRadius, bearingLength);
 });
 
-test('createLinkGeometry wraps loopRadius around both end stations and pinches to waistRadius in the middle', () => {
+test('createLinkGeometry front/back rings wrap loopRadius around both end stations and pinch to waistRadius at the midpoint', () => {
   const start = { position: new THREE.Vector3(0, 0, 0), matrix: new THREE.Matrix4() };
   const end = { position: new THREE.Vector3(0, 0, 10), matrix: new THREE.Matrix4().makeRotationX(Math.PI / 2) };
   const loopRadius = 3;
   const waistRadius = 1;
+  const thickness = 0.4;
+  const halfThickness = thickness / 2;
   const radialSegments = 8;
   const lengthSegments = 4;
 
-  const geom = createLinkGeometry(start, end, { loopRadius, waistRadius, radialSegments, lengthSegments });
+  const geom = createLinkGeometry(start, end, { loopRadius, waistRadius, thickness, radialSegments, lengthSegments });
   const position = geom.getAttribute('position');
 
-  for (let j = 0; j < radialSegments; j++) {
-    const theta = (j / radialSegments) * 2 * Math.PI;
-    const local = new THREE.Vector3(0, Math.cos(theta) * loopRadius, Math.sin(theta) * loopRadius);
+  [-halfThickness, halfThickness].forEach(xOffset => {
+    for (let j = 0; j < radialSegments; j++) {
+      const theta = (j / radialSegments) * 2 * Math.PI;
+      const local = new THREE.Vector3(0, Math.cos(theta) * loopRadius, Math.sin(theta) * loopRadius);
 
-    const expectedAtStart = local.clone().applyMatrix4(start.matrix).add(start.position);
-    assert.ok(anyVertexNear(position, expectedAtStart), 'expected a loopRadius ring vertex at the start station');
+      const axialShiftAtStart = new THREE.Vector3(xOffset, 0, 0).applyMatrix4(start.matrix);
+      const expectedAtStart = local.clone().applyMatrix4(start.matrix).add(start.position).add(axialShiftAtStart);
+      assert.ok(anyVertexNear(position, expectedAtStart), 'expected a loopRadius ring vertex at the start station');
 
-    const expectedAtEnd = local.clone().applyMatrix4(end.matrix).add(end.position);
-    assert.ok(anyVertexNear(position, expectedAtEnd), 'expected a loopRadius ring vertex at the end station');
-  }
+      const axialShiftAtEnd = new THREE.Vector3(xOffset, 0, 0).applyMatrix4(end.matrix);
+      const expectedAtEnd = local.clone().applyMatrix4(end.matrix).add(end.position).add(axialShiftAtEnd);
+      assert.ok(anyVertexNear(position, expectedAtEnd), 'expected a loopRadius ring vertex at the end station');
+    }
+  });
 
   // the midpoint (s=0.5) orientation is the slerp of the two end orientations,
   // per Decision 5 (the twist happens along the link's length, not at its ends)
@@ -202,47 +208,57 @@ test('createLinkGeometry wraps loopRadius around both end stations and pinches t
   const midMatrix = new THREE.Matrix4().makeRotationFromQuaternion(q1.clone().slerp(q2, 0.5));
   const midPosition = start.position.clone().lerp(end.position, 0.5);
 
-  for (let j = 0; j < radialSegments; j++) {
-    const theta = (j / radialSegments) * 2 * Math.PI;
-    const expectedAtWaist = new THREE.Vector3(0, Math.cos(theta) * waistRadius, Math.sin(theta) * waistRadius)
-      .applyMatrix4(midMatrix)
-      .add(midPosition);
-    assert.ok(anyVertexNear(position, expectedAtWaist), 'expected a waistRadius ring vertex at the midpoint');
-  }
+  [-halfThickness, halfThickness].forEach(xOffset => {
+    const axialShift = new THREE.Vector3(xOffset, 0, 0).applyMatrix4(midMatrix);
+    for (let j = 0; j < radialSegments; j++) {
+      const theta = (j / radialSegments) * 2 * Math.PI;
+      const expectedAtWaist = new THREE.Vector3(0, Math.cos(theta) * waistRadius, Math.sin(theta) * waistRadius)
+        .applyMatrix4(midMatrix)
+        .add(midPosition)
+        .add(axialShift);
+      assert.ok(anyVertexNear(position, expectedAtWaist), 'expected a waistRadius ring vertex at the midpoint');
+    }
+  });
 });
 
-test('createLinkGeometry thickness flattens the waist along local Z while its width stays at waistRadius', () => {
+test('createLinkGeometry thickness separates the front and back faces along the local pin axis, not the outline itself', () => {
   const start = { position: new THREE.Vector3(0, 0, 0), matrix: new THREE.Matrix4() };
   const end = { position: new THREE.Vector3(0, 0, 10), matrix: new THREE.Matrix4() };
   const loopRadius = 3;
   const waistRadius = 1;
-  const thickness = 0.4;
+  const radialSegments = 8;
   const lengthSegments = 4;
-
-  const geom = createLinkGeometry(start, end, {
-    loopRadius, waistRadius, thickness, radialSegments: 8, lengthSegments,
-  });
-  const position = geom.getAttribute('position');
   const midPosition = start.position.clone().lerp(end.position, 0.5);
 
-  // theta=0 -> local Y (the "wide" axis): still waistRadius
-  assert.ok(anyVertexNear(position, midPosition.clone().add(new THREE.Vector3(0, waistRadius, 0))));
-  // theta=pi/2 -> local Z (the "thin" axis): flattened to thickness/2
-  assert.ok(anyVertexNear(position, midPosition.clone().add(new THREE.Vector3(0, 0, thickness / 2))));
-  // and NOT still at waistRadius along Z, which would mean thickness had no effect
-  assert.ok(!anyVertexNear(position, midPosition.clone().add(new THREE.Vector3(0, 0, waistRadius)), 1e-2));
+  const thin = createLinkGeometry(start, end, { loopRadius, waistRadius, thickness: 0.2, radialSegments, lengthSegments }).getAttribute('position');
+  const thick = createLinkGeometry(start, end, { loopRadius, waistRadius, thickness: 4, radialSegments, lengthSegments }).getAttribute('position');
+
+  // each geometry's face sits at its own thickness/2 along the local pin
+  // axis (X), with the same waistRadius outline (theta=0, local Y) either
+  // way -- this is what was missing before: thickness now visibly
+  // separates the two faces instead of distorting the Y-Z outline
+  const thinFace = midPosition.clone().add(new THREE.Vector3(0.1, waistRadius, 0));
+  const thickFace = midPosition.clone().add(new THREE.Vector3(2, waistRadius, 0));
+  assert.ok(anyVertexNear(thin, thinFace));
+  assert.ok(!anyVertexNear(thin, thickFace));
+  assert.ok(anyVertexNear(thick, thickFace));
+  assert.ok(!anyVertexNear(thick, thinFace));
 });
 
-test('createLinkGeometry defaults thickness to waistRadius * 2, reproducing a round (non-flattened) waist', () => {
+test('createLinkGeometry stitches a rim connecting the front and back faces at every length step', () => {
   const start = { position: new THREE.Vector3(0, 0, 0), matrix: new THREE.Matrix4() };
   const end = { position: new THREE.Vector3(0, 0, 10), matrix: new THREE.Matrix4() };
-  const waistRadius = 1;
+  const radialSegments = 6;
+  const lengthSegments = 2;
 
-  const geom = createLinkGeometry(start, end, { loopRadius: 3, waistRadius, radialSegments: 8, lengthSegments: 4 });
+  const geom = createLinkGeometry(start, end, { loopRadius: 3, waistRadius: 1, thickness: 1, radialSegments, lengthSegments });
   const position = geom.getAttribute('position');
-  const midPosition = start.position.clone().lerp(end.position, 0.5);
 
-  assert.ok(anyVertexNear(position, midPosition.clone().add(new THREE.Vector3(0, 0, waistRadius))));
+  const frontFaceVerts = lengthSegments * radialSegments * 6;
+  const backFaceVerts = lengthSegments * radialSegments * 6;
+  const rimVerts = (lengthSegments + 1) * radialSegments * 6;
+
+  assert.equal(position.count, frontFaceVerts + backFaceVerts + rimVerts);
 });
 
 test('createLinkGeometry axialOffset shifts the whole plate along the local pin axis', () => {
@@ -251,11 +267,14 @@ test('createLinkGeometry axialOffset shifts the whole plate along the local pin 
   const loopRadius = 3;
   const axialOffset = 2;
 
-  const geom = createLinkGeometry(start, end, { loopRadius, waistRadius: 1, axialOffset, radialSegments: 6, lengthSegments: 2 });
+  const geom = createLinkGeometry(start, end, {
+    loopRadius, waistRadius: 1, thickness: 0, axialOffset, radialSegments: 6, lengthSegments: 2,
+  });
   const position = geom.getAttribute('position');
 
-  // start.matrix is identity, so local X is world X: the shifted ring
-  // centre at the start station is (axialOffset, 0, 0)
+  // thickness=0 collapses the front/back faces onto the same offset, so
+  // the ring centre at the start station is exactly (axialOffset, 0, 0)
+  // (start.matrix is identity, so local X is world X)
   const expected = new THREE.Vector3(axialOffset, loopRadius, 0);
   assert.ok(anyVertexNear(position, expected));
 });
@@ -271,11 +290,13 @@ test('createChainLinksGeometry places two plates per gap, alternating inner/oute
   const lengthSegments = 2;
 
   const geom = createChainLinksGeometry(linkCount, ringRadius, 0, {
-    loopRadius, waistRadius, innerSeparation, outerSeparation, radialSegments, lengthSegments,
+    loopRadius, waistRadius, thickness: 0, innerSeparation, outerSeparation, radialSegments, lengthSegments,
   });
   const transforms = createPinTransforms(linkCount, ringRadius, 0);
   const position = geom.getAttribute('position');
-  const vertsPerPlate = lengthSegments * radialSegments * 6;
+  // thickness=0 collapses front/back onto the same points, but the geometry
+  // still includes a front face, a back face, and a rim (see createLinkGeometry)
+  const vertsPerPlate = radialSegments * 6 * (2 * lengthSegments + (lengthSegments + 1));
 
   assert.equal(position.count, vertsPerPlate * linkCount * 2);
 
@@ -328,14 +349,16 @@ test('createChainGeometry merges pins, bearings, and links, all sharing the same
   const geom = createChainGeometry({
     linkCount, ringRadius, twists: 0.5,
     pinRadius, pinLength, bearingRadius, bearingLength,
-    linkWaistRadius: 0.5, linkInnerSeparation: 1, linkOuterSeparation: 2,
+    linkWaistRadius: 0.5, linkThickness: 0.5, linkInnerSeparation: 1, linkOuterSeparation: 2,
   });
   const transforms = createPinTransforms(linkCount, ringRadius, 0.5);
   const position = geom.getAttribute('position');
 
   const singleCylinder = new THREE.CylinderGeometry(1, 1, 1, 12).toNonIndexed();
   const vertsPerCylinder = singleCylinder.getAttribute('position').count;
-  const vertsPerPlate = 8 * 12 * 6; // createChainGeometry uses createLinkGeometry's defaults (lengthSegments=8, radialSegments=12)
+  // createChainGeometry uses createLinkGeometry's defaults (lengthSegments=8,
+  // radialSegments=12): a front face, a back face, and a rim
+  const vertsPerPlate = 12 * 6 * (2 * 8 + (8 + 1));
 
   const expectedCount = vertsPerCylinder * linkCount * 2 + vertsPerPlate * linkCount * 2;
   assert.equal(position.count, expectedCount);
@@ -343,4 +366,31 @@ test('createChainGeometry merges pins, bearings, and links, all sharing the same
   // pins occupy the first block of vertices, bearings the second
   assertStationCylindersCentered(transforms, position, 0, vertsPerCylinder, pinRadius, pinLength);
   assertStationCylindersCentered(transforms, position, vertsPerCylinder * linkCount, vertsPerCylinder, bearingRadius, bearingLength);
+});
+
+test('createChainGeometry ties the link taper resolution (lengthSegments) to the same Smoothness value as radialSegments', () => {
+  // Pins/bearings have a constant radius along their length, so only
+  // radialSegments affects how round they look; links taper from
+  // loopRadius to waistRadius and back, so that taper needs its own
+  // resolution (lengthSegments) tied to the same Smoothness control, or it
+  // stays faceted regardless of how round the circular cross-section is.
+  const linkCount = 4;
+  const ringRadius = 40;
+  const radialSegments = 6;
+
+  const geom = createChainGeometry({
+    linkCount, ringRadius, twists: 0,
+    pinRadius: 1, pinLength: 4, bearingRadius: 2, bearingLength: 3,
+    linkWaistRadius: 0.5, linkThickness: 0.5, linkInnerSeparation: 1, linkOuterSeparation: 2,
+    radialSegments,
+  });
+  const position = geom.getAttribute('position');
+
+  const singleCylinder = new THREE.CylinderGeometry(1, 1, 1, radialSegments).toNonIndexed();
+  const vertsPerCylinder = singleCylinder.getAttribute('position').count;
+  // lengthSegments should now equal radialSegments too, both driven by Smoothness
+  const vertsPerPlate = radialSegments * 6 * (2 * radialSegments + (radialSegments + 1));
+
+  const expectedCount = vertsPerCylinder * linkCount * 2 + vertsPerPlate * linkCount * 2;
+  assert.equal(position.count, expectedCount);
 });

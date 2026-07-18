@@ -96,31 +96,16 @@ function slerpTransformMatrix(m1, m2, t) {
   return new THREE.Matrix4().makeRotationFromQuaternion(q);
 }
 
-// Builds one "figure-eight" link plate spanning from one station's bearing
-// to the next: a tube that wraps fully around the pin axis (radius =
-// loopRadius, a true circle so it caps the round bearing) at both ends,
-// matching Decision 5 in TODO-bike-chain.md ("pin, barrel, and both link
-// end-loops at a given station lie in one flat plane"), and narrows toward
-// the middle into a flattened ellipse -- waistRadius wide (in the bearing's
-// radial direction) but only `thickness` deep (along the pin axis) -- so it
-// reads as a thin plate rather than a round rod. Since the two end
-// stations' frames differ (twist accumulates station to station), the
-// cross-section's orientation is slerped along the link's length rather
-// than held fixed -- the twist happens in the link's middle, not at its
-// coplanar ends.
-// axialOffset shifts the whole plate along the (interpolated) local pin
-// axis, so a pair of plates can sandwich the bearing rather than
-// coinciding with it.
-export function createLinkGeometry(startTransform, endTransform, options) {
-  const {
-    loopRadius,
-    waistRadius,
-    thickness = waistRadius * 2,
-    axialOffset = 0,
-    radialSegments = 12,
-    lengthSegments = 8,
-  } = options;
-
+// Builds the ring-per-length-step points for one face of a link plate
+// (see createLinkGeometry): a tube that wraps fully around the pin axis
+// (radius = loopRadius, a true circle so it caps the round bearing) at
+// both ends, matching Decision 5 in TODO-bike-chain.md ("pin, barrel, and
+// both link end-loops at a given station lie in one flat plane"), and
+// narrows to waistRadius in the middle. `xOffset` is an extra shift along
+// the local pin axis on top of `axialOffset`, used by createLinkGeometry to
+// build two parallel copies of this same outline (front/back faces) that
+// are actually `thickness` apart, instead of a zero-depth sheet.
+function buildLinkFaceRings(startTransform, endTransform, { loopRadius, waistRadius, axialOffset, xOffset, radialSegments, lengthSegments }) {
   const rings = [];
   for (let k = 0; k <= lengthSegments; k++) {
     const s = k / lengthSegments;
@@ -128,44 +113,37 @@ export function createLinkGeometry(startTransform, endTransform, options) {
     const position = startTransform.position.clone().lerp(endTransform.position, s);
     const orientation = slerpTransformMatrix(startTransform.matrix, endTransform.matrix, s);
 
-    if (axialOffset !== 0) {
-      const axialShift = new THREE.Vector3(axialOffset, 0, 0).applyMatrix4(orientation);
+    const totalOffset = axialOffset + xOffset;
+    if (totalOffset !== 0) {
+      const axialShift = new THREE.Vector3(totalOffset, 0, 0).applyMatrix4(orientation);
       position.add(axialShift);
     }
 
-    // taper: loopRadius at both ends (s=0, s=1) in both directions (a true
-    // circle, to cap the bearing); at the middle, radiusWide narrows to
-    // waistRadius while radiusThin narrows further to thickness/2,
-    // flattening the cross-section into an ellipse.
-    const taper = Math.abs(2 * s - 1);
-    const radiusWide = waistRadius + (loopRadius - waistRadius) * taper;
-    const radiusThin = (thickness / 2) + (loopRadius - thickness / 2) * taper;
+    // linear taper: loopRadius at both ends (s=0, s=1), waistRadius at the middle
+    const radius = waistRadius + (loopRadius - waistRadius) * Math.abs(2 * s - 1);
 
     const ring = [];
     for (let j = 0; j < radialSegments; j++) {
       const theta = (j / radialSegments) * 2 * Math.PI;
-      const point = new THREE.Vector3(0, Math.cos(theta) * radiusWide, Math.sin(theta) * radiusThin);
+      const point = new THREE.Vector3(0, Math.cos(theta) * radius, Math.sin(theta) * radius);
       point.applyMatrix4(orientation);
       point.add(position);
       ring.push(point);
     }
     rings.push(ring);
   }
+  return rings;
+}
 
-  const vertices = [];
-  const uvs = [];
+function pushRingStrip(vertices, rings, lengthSegments, radialSegments) {
   for (let k = 0; k < lengthSegments; k++) {
     const ringA = rings[k];
     const ringB = rings[k + 1];
-    const uA = k / lengthSegments;
-    const uB = (k + 1) / lengthSegments;
     for (let j = 0; j < radialSegments; j++) {
       const a1 = ringA[j];
       const a2 = ringA[(j + 1) % radialSegments];
       const b1 = ringB[j];
       const b2 = ringB[(j + 1) % radialSegments];
-      const vA1 = j / radialSegments;
-      const vA2 = (j + 1) / radialSegments;
       vertices.push(
         a1.x, a1.y, a1.z,
         a2.x, a2.y, a2.z,
@@ -175,24 +153,75 @@ export function createLinkGeometry(startTransform, endTransform, options) {
         b2.x, b2.y, b2.z,
         b1.x, b1.y, b1.z
       );
-      // matches CylinderGeometry's attribute set (position/normal/uv) so
-      // this geometry can be merged with pin/bearing cylinders via
-      // BufferGeometryUtils.mergeGeometries.
-      uvs.push(
-        uA, vA1,
-        uA, vA2,
-        uB, vA2,
+    }
+  }
+}
 
-        uA, vA1,
-        uB, vA2,
-        uB, vA1
+// Builds one "figure-eight" link plate spanning from one station's bearing
+// to the next. Since the two end stations' frames differ (twist
+// accumulates station to station), the cross-section's orientation is
+// slerped along the link's length rather than held fixed -- the twist
+// happens in the link's middle, not at its coplanar ends.
+// The plate is two parallel copies of the same tapering outline (see
+// buildLinkFaceRings), offset `thickness` apart along the local pin axis
+// and stitched together at every step, so it's a genuine slab with depth
+// rather than a zero-thickness sheet -- the outline itself (loopRadius /
+// waistRadius) always lies in the plane perpendicular to the pin axis, and
+// `thickness` is a separate dimension along that axis, not a distortion of
+// the outline.
+// axialOffset shifts the whole plate along the (interpolated) local pin
+// axis, so a pair of plates can sandwich the bearing rather than
+// coinciding with it.
+export function createLinkGeometry(startTransform, endTransform, options) {
+  const {
+    loopRadius,
+    waistRadius,
+    thickness,
+    axialOffset = 0,
+    radialSegments = 12,
+    lengthSegments = 8,
+  } = options;
+
+  const halfThickness = thickness / 2;
+  const ringOptions = { loopRadius, waistRadius, axialOffset, radialSegments, lengthSegments };
+  const frontRings = buildLinkFaceRings(startTransform, endTransform, { ...ringOptions, xOffset: -halfThickness });
+  const backRings = buildLinkFaceRings(startTransform, endTransform, { ...ringOptions, xOffset: halfThickness });
+
+  const vertices = [];
+  pushRingStrip(vertices, frontRings, lengthSegments, radialSegments);
+  pushRingStrip(vertices, backRings, lengthSegments, radialSegments);
+
+  // rim: connects the front and back rings at every step, closing the gap
+  // between the two faces so the link reads as a solid slab rather than
+  // two separate parallel sheets.
+  for (let k = 0; k <= lengthSegments; k++) {
+    const front = frontRings[k];
+    const back = backRings[k];
+    for (let j = 0; j < radialSegments; j++) {
+      const f1 = front[j];
+      const f2 = front[(j + 1) % radialSegments];
+      const b1 = back[j];
+      const b2 = back[(j + 1) % radialSegments];
+      vertices.push(
+        f1.x, f1.y, f1.z,
+        f2.x, f2.y, f2.z,
+        b2.x, b2.y, b2.z,
+
+        f1.x, f1.y, f1.z,
+        b2.x, b2.y, b2.z,
+        b1.x, b1.y, b1.z
       );
     }
   }
 
+  // uv is unused (no texture map is applied to this material), but needs to
+  // exist and match CylinderGeometry's attribute set so this geometry can
+  // be merged with pin/bearing cylinders via BufferGeometryUtils.mergeGeometries.
+  const uvs = new Float32Array((vertices.length / 3) * 2);
+
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -237,6 +266,13 @@ export function createChainGeometry(config) {
     innerSeparation: linkInnerSeparation,
     outerSeparation: linkOuterSeparation,
     radialSegments,
+    // Pins/bearings have a constant radius along their length, so only
+    // radialSegments affects how round they look. Links taper from
+    // loopRadius to waistRadius and back, so that taper is itself a curve
+    // approximated by lengthSegments steps -- without tying it to the same
+    // Smoothness value, the taper stays faceted no matter how round the
+    // circular cross-section is.
+    lengthSegments: radialSegments,
   });
 
   return mergeGeometries([pins, bearings, links]);
