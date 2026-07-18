@@ -137,13 +137,31 @@ as we iterate.
       Switching back to Polygon re-enables Smoothness with no regressions.
       `npm test` — 18/18 passing.
 
-### Phase 2 — bearing barrel around each pin
-- [ ] Add a barrel cylinder concentric with each pin, at the Phase-1
-      transforms.
-- [ ] Parameterize `bearingRadius`, `bearingLength` (watch: must fit within
-      the pin length and within the link end-loops added in Phase 3).
-- [ ] Tests: barrel count matches pin count; barrel dimensions reflected in
-      vertex bounds; each barrel shares its pin's transform exactly.
+### Phase 2 — bearing barrel around each pin ✅
+- [x] `createBearingGeometry(bearingRadius, bearingLength, linkCount,
+      ringRadius, twists)` in [modules/chain.js](modules/chain.js) — reuses
+      the same per-station transforms as the pins via a shared
+      `createStationCylinderGeometry` helper (pins and bearings are both
+      "a cylinder at each station," just different radius/length).
+      `createChainGeometry(...)` merges pins + bearings into one
+      `BufferGeometry` for the style's `buildGeometry`.
+- [x] Added "Bearing Radius (mm)" / "Bearing Length (mm)" controls
+      (`bearingRadius`, `bearingLength`) in the Size section of
+      [index.html](index.html), following the same pattern as Pin Length.
+- [x] Tests ([test/chain.test.js](test/chain.test.js)): bearing count
+      matches `linkCount`; each bearing is centred exactly on its pin's
+      transform (reusing the min/max-distance check from Phase 1, factored
+      into a shared `assertStationCylindersCentered` helper); the merged
+      chain geometry contains both blocks (pins then bearings) each
+      correctly sized and centred.
+- [x] Visually verified in-browser: each pin now has a wider, shorter
+      barrel centred on it, with the thinner pin still visible poking out
+      both ends; twist and all Phase-1 controls still behave correctly.
+      `npm test` — 21/21 passing.
+- Note for Phase 3: bearing/pin sizing isn't validated against each other
+  (e.g. nothing stops `bearingLength > pinLength`) — fine for now since
+  it's just visual tuning, but worth keeping in mind once link end-loops
+  need to fit around the bearing without overhanging the pin.
 
 ### Phase 3 — figure-eight links
 This phase carries the most visual risk (profile shape + mid-link twist), so

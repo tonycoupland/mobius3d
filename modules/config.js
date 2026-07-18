@@ -35,6 +35,8 @@ export function getConfig(){
     config["ratio"] = parseInt(document.getElementById('ratio').value);
     config["linkCount"] = parseInt(document.getElementById('linkCount').value);
     config["pinLength"] = parseFloat(document.getElementById('pinLength').value);
+    config["bearingRadius"] = parseFloat(document.getElementById('bearingRadius').value);
+    config["bearingLength"] = parseFloat(document.getElementById('bearingLength').value);
     config["colour"] = document.getElementById('colour').value;
     return config;
 }

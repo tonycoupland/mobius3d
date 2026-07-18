@@ -36,11 +36,12 @@ export function createPinTransforms(linkCount, ringRadius, twists) {
   return transforms;
 }
 
-export function createPinGeometry(pinRadius, pinLength, linkCount, ringRadius, twists) {
-  const transforms = createPinTransforms(linkCount, ringRadius, twists);
-
-  const pinGeometries = transforms.map(({ position, matrix }) => {
-    const geometry = new THREE.CylinderGeometry(pinRadius, pinRadius, pinLength, 12);
+// Places one cylinder per station transform, sharing its position and
+// orientation exactly (used for both the pin and the concentric bearing
+// barrel around it, per Decision 5 in TODO-bike-chain.md).
+function createStationCylinderGeometry(radius, length, transforms) {
+  const geometries = transforms.map(({ position, matrix }) => {
+    const geometry = new THREE.CylinderGeometry(radius, radius, length, 12);
     // CylinderGeometry's axis defaults to Y; the twist/face matrices above
     // are built around the local X axis, matching how cross-section points
     // are laid out in mobius.js.
@@ -50,5 +51,21 @@ export function createPinGeometry(pinRadius, pinLength, linkCount, ringRadius, t
     return geometry;
   });
 
-  return mergeGeometries(pinGeometries);
+  return mergeGeometries(geometries);
+}
+
+export function createPinGeometry(pinRadius, pinLength, linkCount, ringRadius, twists) {
+  const transforms = createPinTransforms(linkCount, ringRadius, twists);
+  return createStationCylinderGeometry(pinRadius, pinLength, transforms);
+}
+
+export function createBearingGeometry(bearingRadius, bearingLength, linkCount, ringRadius, twists) {
+  const transforms = createPinTransforms(linkCount, ringRadius, twists);
+  return createStationCylinderGeometry(bearingRadius, bearingLength, transforms);
+}
+
+export function createChainGeometry(pinRadius, pinLength, bearingRadius, bearingLength, linkCount, ringRadius, twists) {
+  const pins = createPinGeometry(pinRadius, pinLength, linkCount, ringRadius, twists);
+  const bearings = createBearingGeometry(bearingRadius, bearingLength, linkCount, ringRadius, twists);
+  return mergeGeometries([pins, bearings]);
 }

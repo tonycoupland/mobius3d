@@ -41,9 +41,11 @@ test('rectangularStyle derives sides from ratio and keeps a fixed twist scale', 
   assert.equal(factory(10, 6).length, 4);
 });
 
-test('chainStyle hides Smoothness and builds geometry directly, sized off polyRadius and pinLength', () => {
-  assert.deepEqual(chainStyle.ownedControlIds, ['linkCount', 'pinLength']);
+test('chainStyle hides Smoothness and builds geometry directly, sized off polyRadius and its own controls', () => {
+  assert.deepEqual(chainStyle.ownedControlIds, ['linkCount', 'pinLength', 'bearingRadius', 'bearingLength']);
   assert.deepEqual(chainStyle.irrelevantCommonControlIds, ['segments']);
-  const geom = chainStyle.buildGeometry({ polyRadius: 6, pinLength: 9, ringRadius: 40, linkCount: 6, twist: 0 });
+  const geom = chainStyle.buildGeometry({
+    polyRadius: 6, pinLength: 9, bearingRadius: 3, bearingLength: 6, ringRadius: 40, linkCount: 6, twist: 0
+  });
   assert.ok(geom.getAttribute('position').count > 0);
 });

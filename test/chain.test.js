@@ -1,7 +1,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createPinTransforms, createPinGeometry } from '../modules/chain.js';
+import { createPinTransforms, createPinGeometry, createBearingGeometry, createChainGeometry } from '../modules/chain.js';
+
+// A cylinder's own two cap-centre vertices are the only ones sitting
+// exactly length/2 from its geometric centre (every other vertex is
+// farther away, out on the radius); every vertex is within
+// sqrt(radius^2 + (length/2)^2) of it. Checking those two extremes per
+// station confirms each cylinder is centred exactly on its transform's
+// position without depending on the cap triangulation's exact vertex order.
+function assertStationCylindersCentered(transforms, position, blockOffset, vertsPerCylinder, radius, length) {
+  const expectedMin = length / 2;
+  const expectedMax = Math.sqrt(radius ** 2 + (length / 2) ** 2);
+
+  transforms.forEach((transform, i) => {
+    let minDist = Infinity;
+    let maxDist = 0;
+    for (let v = 0; v < vertsPerCylinder; v++) {
+      const idx = blockOffset + i * vertsPerCylinder + v;
+      const vertex = new THREE.Vector3(position.getX(idx), position.getY(idx), position.getZ(idx));
+      const dist = vertex.distanceTo(transform.position);
+      minDist = Math.min(minDist, dist);
+      maxDist = Math.max(maxDist, dist);
+    }
+    assert.ok(Math.abs(minDist - expectedMin) < 1e-4);
+    assert.ok(Math.abs(maxDist - expectedMax) < 1e-4);
+  });
+}
 
 test('createPinTransforms returns one transform per link, evenly spaced by angle on the ring', () => {
   const linkCount = 8;
@@ -80,26 +105,41 @@ test('createPinGeometry centres each pin at its transform position', () => {
   const singleCylinder = new THREE.CylinderGeometry(pinRadius, pinRadius, pinLength, 12);
   const vertsPerCylinder = singleCylinder.getAttribute('position').count;
 
-  // A cylinder's own two cap-centre vertices are the only ones sitting
-  // exactly pinLength/2 from its geometric centre (every other vertex is
-  // farther away, out on the radius); every vertex is within
-  // sqrt(pinRadius^2 + (pinLength/2)^2) of it. Checking those two extremes
-  // per pin confirms each cylinder is centred exactly on its transform's
-  // position without depending on the cap triangulation's exact vertex order.
-  const expectedMin = pinLength / 2;
-  const expectedMax = Math.sqrt(pinRadius ** 2 + (pinLength / 2) ** 2);
+  assertStationCylindersCentered(transforms, position, 0, vertsPerCylinder, pinRadius, pinLength);
+});
 
-  transforms.forEach((transform, i) => {
-    let minDist = Infinity;
-    let maxDist = 0;
-    for (let v = 0; v < vertsPerCylinder; v++) {
-      const idx = i * vertsPerCylinder + v;
-      const vertex = new THREE.Vector3(position.getX(idx), position.getY(idx), position.getZ(idx));
-      const dist = vertex.distanceTo(transform.position);
-      minDist = Math.min(minDist, dist);
-      maxDist = Math.max(maxDist, dist);
-    }
-    assert.ok(Math.abs(minDist - expectedMin) < 1e-4);
-    assert.ok(Math.abs(maxDist - expectedMax) < 1e-4);
-  });
+test('createBearingGeometry produces one merged cylinder per link, centred on its transform', () => {
+  const linkCount = 5;
+  const ringRadius = 40;
+  const bearingRadius = 2;
+  const bearingLength = 3;
+  const geom = createBearingGeometry(bearingRadius, bearingLength, linkCount, ringRadius, 0);
+  const transforms = createPinTransforms(linkCount, ringRadius, 0);
+  const position = geom.getAttribute('position');
+
+  const singleCylinder = new THREE.CylinderGeometry(bearingRadius, bearingRadius, bearingLength, 12);
+  const vertsPerCylinder = singleCylinder.getAttribute('position').count;
+
+  assert.equal(position.count, vertsPerCylinder * linkCount);
+  assertStationCylindersCentered(transforms, position, 0, vertsPerCylinder, bearingRadius, bearingLength);
+});
+
+test('createChainGeometry merges pins and bearings, both sharing the same station transforms', () => {
+  const linkCount = 5;
+  const ringRadius = 40;
+  const pinRadius = 1;
+  const pinLength = 4;
+  const bearingRadius = 2;
+  const bearingLength = 3;
+  const geom = createChainGeometry(pinRadius, pinLength, bearingRadius, bearingLength, linkCount, ringRadius, 0.5);
+  const transforms = createPinTransforms(linkCount, ringRadius, 0.5);
+  const position = geom.getAttribute('position');
+
+  const singleCylinder = new THREE.CylinderGeometry(1, 1, 1, 12);
+  const vertsPerCylinder = singleCylinder.getAttribute('position').count;
+
+  assert.equal(position.count, vertsPerCylinder * linkCount * 2);
+  // pins occupy the first block of vertices, bearings the second
+  assertStationCylindersCentered(transforms, position, 0, vertsPerCylinder, pinRadius, pinLength);
+  assertStationCylindersCentered(transforms, position, vertsPerCylinder * linkCount, vertsPerCylinder, bearingRadius, bearingLength);
 });
