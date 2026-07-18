@@ -67,6 +67,7 @@
   <h2>Size</h2>
   <label>Ring Radius (mm)<input type="number" id="ringRadius" value="40" step="1"></label>
   <label>Slice Radius (mm)<input type="number" id="polygonRadius" value="6" step="1"></label>
+  <label>Pin Length (mm)<input type="number" id="pinLength" value="9" step="0.5" data-style-owned></label>
 
   <h2>Appearance</h2>
   <label>Colour
@@ -83,10 +84,10 @@
       <option value="#00FFFF" style="background:#00FFFF; color: #000;">Cyan</option>
       <option value="#000000" style="background:#000000; color: #fff;">Black</option>
       <option value="#FF69B4" style="background:#FF69B4;">Hot Pink</option>
-      <option value="#32CD32" style="background:#32CD32;">Grass Green</option>
+      <option value="#32CD32" style="background:#32CD32;" selected>Grass Green</option>
     </select>
   </label>
-  <label>Smoothness<input type="number" id="segments" value="36"></label>
+  <label>Smoothness<input type="number" id="segments" value="36" data-toggleable-common></label>
   <label>Polygon Corner Smoothing<input type="number" id="cornerSmoothing" value="20" data-style-owned></label>
   <h2>Shape</h2>
   <label>Style
@@ -94,6 +95,7 @@
   </label>
   <label>Polygon Sides<input type="number" id="sides" value="6" data-style-owned></label>
   <label>Rectangle Ratio<input type="number" id="ratio" value="10" step="1" data-style-owned></label>
+  <label>Chain Links<input type="number" id="linkCount" value="24" step="1" data-style-owned></label>
   <label>Twist (sides)<input type="number" id="twist" value="5"></label>
 
   <button id="download">Download STL</button>
@@ -124,6 +126,7 @@
     option.textContent = style.label;
     geometryTypeSelect.appendChild(option);
   });
+  geometryTypeSelect.value = 'chain';
 
 
   const canvas = document.getElementById('three-canvas');
@@ -154,12 +157,23 @@
     document.querySelectorAll('#config [data-style-owned]').forEach(el => {
       el.disabled = !style.ownedControlIds.includes(el.id);
     });
+    // Common controls that don't apply to every style (e.g. Smoothness has
+    // no meaning for the discrete chain style) get reset then re-disabled
+    // per the active style, so switching styles doesn't leave a stale state.
+    document.querySelectorAll('#config [data-toggleable-common]').forEach(el => {
+      el.disabled = (style.irrelevantCommonControlIds || []).includes(el.id);
+    });
 
-    const sides = style.resolveSides(config);
-    const twist = config.twist * style.twistScale(config);
-    const polygonFactory = style.createPointFactory(config);
-
-    const geom = MOBIUS.generateGeometry(sides, config.polyRadius, config.ringRadius, config.segments, twist, polygonFactory);
+    const geom = style.buildGeometry
+      ? style.buildGeometry(config)
+      : MOBIUS.generateGeometry(
+          style.resolveSides(config),
+          config.polyRadius,
+          config.ringRadius,
+          config.segments,
+          config.twist * style.twistScale(config),
+          style.createPointFactory(config)
+        );
     const material = new THREE.MeshStandardMaterial({
       color: config.colour,
       flatShading: true,

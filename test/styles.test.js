@@ -4,6 +4,7 @@ import { STYLES, getStyle } from '../modules/styles/index.js';
 import { polygonStyle } from '../modules/styles/polygonStyle.js';
 import { roundedStyle } from '../modules/styles/roundedStyle.js';
 import { rectangularStyle } from '../modules/styles/rectangularStyle.js';
+import { chainStyle } from '../modules/styles/chainStyle.js';
 
 test('getStyle looks styles up by id', () => {
   assert.equal(getStyle('rounded'), roundedStyle);
@@ -16,7 +17,7 @@ test('getStyle throws on an unknown id', () => {
 });
 
 test('STYLES registers every known style exactly once', () => {
-  assert.deepEqual(STYLES.map(s => s.id), ['polygon', 'rounded', 'rectangular']);
+  assert.deepEqual(STYLES.map(s => s.id), ['polygon', 'rounded', 'rectangular', 'chain']);
 });
 
 test('polygonStyle resolves sides and twist directly from config', () => {
@@ -38,4 +39,11 @@ test('rectangularStyle derives sides from ratio and keeps a fixed twist scale', 
   assert.equal(rectangularStyle.twistScale({}), 2);
   const factory = rectangularStyle.createPointFactory({});
   assert.equal(factory(10, 6).length, 4);
+});
+
+test('chainStyle hides Smoothness and builds geometry directly, sized off polyRadius and pinLength', () => {
+  assert.deepEqual(chainStyle.ownedControlIds, ['linkCount', 'pinLength']);
+  assert.deepEqual(chainStyle.irrelevantCommonControlIds, ['segments']);
+  const geom = chainStyle.buildGeometry({ polyRadius: 6, pinLength: 9, ringRadius: 40, linkCount: 6, twist: 0 });
+  assert.ok(geom.getAttribute('position').count > 0);
 });

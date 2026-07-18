@@ -33,6 +33,8 @@ export function getConfig(){
     config["cornerSmoothing"] = parseFloat(document.getElementById('cornerSmoothing').value);
     config["geometryType"] = document.getElementById('geometryType').value;
     config["ratio"] = parseInt(document.getElementById('ratio').value);
+    config["linkCount"] = parseInt(document.getElementById('linkCount').value);
+    config["pinLength"] = parseFloat(document.getElementById('pinLength').value);
     config["colour"] = document.getElementById('colour').value;
     return config;
 }
