@@ -37,6 +37,9 @@ export function getConfig(){
     config["pinLength"] = parseFloat(document.getElementById('pinLength').value);
     config["bearingRadius"] = parseFloat(document.getElementById('bearingRadius').value);
     config["bearingLength"] = parseFloat(document.getElementById('bearingLength').value);
+    config["linkWaistRadius"] = parseFloat(document.getElementById('linkWaistRadius').value);
+    config["linkInnerSeparation"] = parseFloat(document.getElementById('linkInnerSeparation').value);
+    config["linkOuterSeparation"] = parseFloat(document.getElementById('linkOuterSeparation').value);
     config["colour"] = document.getElementById('colour').value;
     return config;
 }

@@ -10,15 +10,21 @@ const PIN_RADIUS_RATIO = 0.25;
 export const chainStyle = {
   id: 'chain',
   label: 'Bike Chain',
-  ownedControlIds: ['linkCount', 'pinLength', 'bearingRadius', 'bearingLength'],
+  ownedControlIds: [
+    'linkCount', 'pinLength', 'bearingRadius', 'bearingLength',
+    'linkWaistRadius', 'linkInnerSeparation', 'linkOuterSeparation',
+  ],
   irrelevantCommonControlIds: ['segments'],
-  buildGeometry: (config) => CHAIN.createChainGeometry(
-    config.polyRadius * PIN_RADIUS_RATIO,
-    config.pinLength,
-    config.bearingRadius,
-    config.bearingLength,
-    config.linkCount,
-    config.ringRadius,
-    config.twist
-  ),
+  buildGeometry: (config) => CHAIN.createChainGeometry({
+    linkCount: config.linkCount,
+    ringRadius: config.ringRadius,
+    twists: config.twist,
+    pinRadius: config.polyRadius * PIN_RADIUS_RATIO,
+    pinLength: config.pinLength,
+    bearingRadius: config.bearingRadius,
+    bearingLength: config.bearingLength,
+    linkWaistRadius: config.linkWaistRadius,
+    linkInnerSeparation: config.linkInnerSeparation,
+    linkOuterSeparation: config.linkOuterSeparation,
+  }),
 };

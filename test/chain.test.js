@@ -1,7 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createPinTransforms, createPinGeometry, createBearingGeometry, createChainGeometry } from '../modules/chain.js';
+import {
+  createPinTransforms, createPinGeometry, createBearingGeometry,
+  createLinkGeometry, createChainLinksGeometry, createChainGeometry,
+} from '../modules/chain.js';
+
+function anyVertexNear(position, point, tolerance = 1e-4) {
+  for (let i = 0; i < position.count; i++) {
+    const vertex = new THREE.Vector3(position.getX(i), position.getY(i), position.getZ(i));
+    if (vertex.distanceTo(point) < tolerance) return true;
+  }
+  return false;
+}
 
 // A cylinder's own two cap-centre vertices are the only ones sitting
 // exactly length/2 from its geometric centre (every other vertex is
@@ -87,7 +98,7 @@ test('createPinGeometry produces one merged cylinder per link', () => {
   const geom = createPinGeometry(1, 4, linkCount, 40, 0);
   const position = geom.getAttribute('position');
 
-  const singleCylinder = new THREE.CylinderGeometry(1, 1, 4, 12);
+  const singleCylinder = new THREE.CylinderGeometry(1, 1, 4, 12).toNonIndexed();
   const vertsPerCylinder = singleCylinder.getAttribute('position').count;
 
   assert.equal(position.count, vertsPerCylinder * linkCount);
@@ -102,7 +113,7 @@ test('createPinGeometry centres each pin at its transform position', () => {
   const transforms = createPinTransforms(linkCount, ringRadius, 0);
   const position = geom.getAttribute('position');
 
-  const singleCylinder = new THREE.CylinderGeometry(pinRadius, pinRadius, pinLength, 12);
+  const singleCylinder = new THREE.CylinderGeometry(pinRadius, pinRadius, pinLength, 12).toNonIndexed();
   const vertsPerCylinder = singleCylinder.getAttribute('position').count;
 
   assertStationCylindersCentered(transforms, position, 0, vertsPerCylinder, pinRadius, pinLength);
@@ -117,28 +128,128 @@ test('createBearingGeometry produces one merged cylinder per link, centred on it
   const transforms = createPinTransforms(linkCount, ringRadius, 0);
   const position = geom.getAttribute('position');
 
-  const singleCylinder = new THREE.CylinderGeometry(bearingRadius, bearingRadius, bearingLength, 12);
+  const singleCylinder = new THREE.CylinderGeometry(bearingRadius, bearingRadius, bearingLength, 12).toNonIndexed();
   const vertsPerCylinder = singleCylinder.getAttribute('position').count;
 
   assert.equal(position.count, vertsPerCylinder * linkCount);
   assertStationCylindersCentered(transforms, position, 0, vertsPerCylinder, bearingRadius, bearingLength);
 });
 
-test('createChainGeometry merges pins and bearings, both sharing the same station transforms', () => {
+test('createLinkGeometry wraps loopRadius around both end stations and pinches to waistRadius in the middle', () => {
+  const start = { position: new THREE.Vector3(0, 0, 0), matrix: new THREE.Matrix4() };
+  const end = { position: new THREE.Vector3(0, 0, 10), matrix: new THREE.Matrix4().makeRotationX(Math.PI / 2) };
+  const loopRadius = 3;
+  const waistRadius = 1;
+  const radialSegments = 8;
+  const lengthSegments = 4;
+
+  const geom = createLinkGeometry(start, end, { loopRadius, waistRadius, radialSegments, lengthSegments });
+  const position = geom.getAttribute('position');
+
+  for (let j = 0; j < radialSegments; j++) {
+    const theta = (j / radialSegments) * 2 * Math.PI;
+    const local = new THREE.Vector3(0, Math.cos(theta) * loopRadius, Math.sin(theta) * loopRadius);
+
+    const expectedAtStart = local.clone().applyMatrix4(start.matrix).add(start.position);
+    assert.ok(anyVertexNear(position, expectedAtStart), 'expected a loopRadius ring vertex at the start station');
+
+    const expectedAtEnd = local.clone().applyMatrix4(end.matrix).add(end.position);
+    assert.ok(anyVertexNear(position, expectedAtEnd), 'expected a loopRadius ring vertex at the end station');
+  }
+
+  // the midpoint (s=0.5) orientation is the slerp of the two end orientations,
+  // per Decision 5 (the twist happens along the link's length, not at its ends)
+  const q1 = new THREE.Quaternion().setFromRotationMatrix(start.matrix);
+  const q2 = new THREE.Quaternion().setFromRotationMatrix(end.matrix);
+  const midMatrix = new THREE.Matrix4().makeRotationFromQuaternion(q1.clone().slerp(q2, 0.5));
+  const midPosition = start.position.clone().lerp(end.position, 0.5);
+
+  for (let j = 0; j < radialSegments; j++) {
+    const theta = (j / radialSegments) * 2 * Math.PI;
+    const expectedAtWaist = new THREE.Vector3(0, Math.cos(theta) * waistRadius, Math.sin(theta) * waistRadius)
+      .applyMatrix4(midMatrix)
+      .add(midPosition);
+    assert.ok(anyVertexNear(position, expectedAtWaist), 'expected a waistRadius ring vertex at the midpoint');
+  }
+});
+
+test('createLinkGeometry axialOffset shifts the whole plate along the local pin axis', () => {
+  const start = { position: new THREE.Vector3(0, 0, 0), matrix: new THREE.Matrix4() };
+  const end = { position: new THREE.Vector3(0, 0, 10), matrix: new THREE.Matrix4() };
+  const loopRadius = 3;
+  const axialOffset = 2;
+
+  const geom = createLinkGeometry(start, end, { loopRadius, waistRadius: 1, axialOffset, radialSegments: 6, lengthSegments: 2 });
+  const position = geom.getAttribute('position');
+
+  // start.matrix is identity, so local X is world X: the shifted ring
+  // centre at the start station is (axialOffset, 0, 0)
+  const expected = new THREE.Vector3(axialOffset, loopRadius, 0);
+  assert.ok(anyVertexNear(position, expected));
+});
+
+test('createChainLinksGeometry places two plates per gap, alternating inner/outer separation', () => {
+  const linkCount = 4;
+  const ringRadius = 40;
+  const loopRadius = 3;
+  const waistRadius = 1;
+  const innerSeparation = 2;
+  const outerSeparation = 5;
+  const radialSegments = 6;
+  const lengthSegments = 2;
+
+  const geom = createChainLinksGeometry(linkCount, ringRadius, 0, {
+    loopRadius, waistRadius, innerSeparation, outerSeparation, radialSegments, lengthSegments,
+  });
+  const transforms = createPinTransforms(linkCount, ringRadius, 0);
+  const position = geom.getAttribute('position');
+  const vertsPerPlate = lengthSegments * radialSegments * 6;
+
+  assert.equal(position.count, vertsPerPlate * linkCount * 2);
+
+  for (let i = 0; i < linkCount; i++) {
+    const separation = i % 2 === 0 ? innerSeparation : outerSeparation;
+    const start = transforms[i];
+    const localX = new THREE.Vector3(1, 0, 0).applyMatrix4(start.matrix);
+
+    [separation / 2, -separation / 2].forEach((axialOffset, plateIndex) => {
+      const plateBlockStart = (i * 2 + plateIndex) * vertsPerPlate;
+      const centreAtStart = start.position.clone().add(localX.clone().multiplyScalar(axialOffset));
+
+      let found = false;
+      for (let v = 0; v < radialSegments; v++) {
+        const idx = plateBlockStart + v * 6;
+        const vertex = new THREE.Vector3(position.getX(idx), position.getY(idx), position.getZ(idx));
+        if (Math.abs(vertex.distanceTo(centreAtStart) - loopRadius) < 1e-4) found = true;
+      }
+      assert.ok(found, `expected a loopRadius-distant vertex for gap ${i} plate ${plateIndex}`);
+    });
+  }
+});
+
+test('createChainGeometry merges pins, bearings, and links, all sharing the same station transforms', () => {
   const linkCount = 5;
   const ringRadius = 40;
   const pinRadius = 1;
   const pinLength = 4;
   const bearingRadius = 2;
   const bearingLength = 3;
-  const geom = createChainGeometry(pinRadius, pinLength, bearingRadius, bearingLength, linkCount, ringRadius, 0.5);
+
+  const geom = createChainGeometry({
+    linkCount, ringRadius, twists: 0.5,
+    pinRadius, pinLength, bearingRadius, bearingLength,
+    linkWaistRadius: 0.5, linkInnerSeparation: 1, linkOuterSeparation: 2,
+  });
   const transforms = createPinTransforms(linkCount, ringRadius, 0.5);
   const position = geom.getAttribute('position');
 
-  const singleCylinder = new THREE.CylinderGeometry(1, 1, 1, 12);
+  const singleCylinder = new THREE.CylinderGeometry(1, 1, 1, 12).toNonIndexed();
   const vertsPerCylinder = singleCylinder.getAttribute('position').count;
+  const vertsPerPlate = 8 * 12 * 6; // createChainGeometry uses createLinkGeometry's defaults (lengthSegments=8, radialSegments=12)
 
-  assert.equal(position.count, vertsPerCylinder * linkCount * 2);
+  const expectedCount = vertsPerCylinder * linkCount * 2 + vertsPerPlate * linkCount * 2;
+  assert.equal(position.count, expectedCount);
+
   // pins occupy the first block of vertices, bearings the second
   assertStationCylindersCentered(transforms, position, 0, vertsPerCylinder, pinRadius, pinLength);
   assertStationCylindersCentered(transforms, position, vertsPerCylinder * linkCount, vertsPerCylinder, bearingRadius, bearingLength);

@@ -163,52 +163,80 @@ as we iterate.
   it's just visual tuning, but worth keeping in mind once link end-loops
   need to fit around the bearing without overhanging the pin.
 
-### Phase 3 — figure-eight links
-This phase carries the most visual risk (profile shape + mid-link twist), so
-build a tight visual feedback loop before wiring it into the full loop:
-
-- [ ] Build an isolated single-link preview harness: a small standalone page,
-      `chain-link-preview.html`, reusing the same buildless
-      Three.js-via-import-map setup as `index.html`, that renders just one
-      pin-to-pin gap — two bearings at a chosen relative twist offset, and
-      the link(s) connecting them — with its own minimal controls (twist
-      offset, bearing radius, link width/thickness, inner vs outer). No ring,
-      no full loop, no camera-navigating-a-large-torus — just the one
-      assembly, close up. Once the profile and mid-link twist look right
-      here, reuse the same generator function from Phase 3's other tasks in
-      `modules/chain.js` for the full loop.
-- [ ] Design the figure-eight profile: two end-loops (radius ≈
-      `bearingRadius`) joined by a waisted middle, in narrow ("inner") and
-      wide ("outer") variants per Decision 2.
-- [ ] Implement the mid-link twist (Decision 5): profile orientation rotates
-      along the link's length from the orientation at one bearing to the
-      orientation at the next, so both end-loops stay flush and coplanar
-      with their bearing.
-- [ ] Place 4 links per pin-to-pin gap (2 inner + 2 outer per Decision 1/2),
-      alternating which pair is inner vs outer link-to-link. Since twist is
-      now a continuous `twists * 180` total (Decision 4, revised) rather
-      than a discrete per-side index, there's no `mod linkCount` seam offset
-      to compute — the closing gap (last pin back to pin 0) is just another
-      link spanning whatever orientation delta the two ends actually have.
-- [ ] Tests: end-loop centers coincide with the bearings they connect; inner
-      vs outer widths differ as expected and alternate correctly around the
-      loop; link count equals `linkCount * 4`; the closing gap connects
-      cleanly regardless of whether `twists` is a "nice" number.
+### Phase 3 — figure-eight links ✅ (v1: rounded, not flat-plate)
+- [x] `createLinkGeometry(startTransform, endTransform, options)` in
+      [modules/chain.js](modules/chain.js) — a tube whose circular
+      cross-section wraps fully around the pin axis (radius = `loopRadius`,
+      reusing `bearingRadius`) at both ends and tapers linearly to a
+      narrower `waistRadius` in the middle. Orientation is slerped and
+      position lerped between the two end stations across `lengthSegments`
+      steps, so the twist happens along the link's length (Decision 5)
+      instead of at its coplanar ends. `axialOffset` shifts a whole plate
+      along the (interpolated) local pin axis.
+- [x] `createChainLinksGeometry(linkCount, ringRadius, twists, options)` —
+      places 2 plates per pin-to-pin gap (`axialOffset = ±separation/2`),
+      alternating `linkInnerSeparation`/`linkOuterSeparation` by gap parity
+      (Decision 1/2: this reads "inner"/"outer" as the axial spacing
+      between the pair of plates bridging a gap, matching how a real roller
+      chain's inner vs outer plate pairs are set at different gauges — not
+      as two different loop/waist widths). No `mod linkCount` seam handling
+      needed: twist is continuous now (Decision 4, revised), so the closing
+      gap is just another plate pair spanning whatever orientation delta
+      the last and first stations actually have.
+      `createChainGeometry` now merges pins + bearings + links into one
+      `BufferGeometry`.
+- [x] Added "Link Waist Radius (mm)", "Link Inner Separation (mm)", "Link
+      Outer Separation (mm)" controls in the Size section.
+- **Known simplification, not the original plan**: this is a solid-of-
+  revolution "dumbbell/spindle" (round in cross-section), not a flat
+  stamped-plate figure-eight outline. Building a true flat 2D outline
+  (two loops + a waisted middle, extruded with a separate thickness axis)
+  was judged substantially more complex for a first pass — see the
+  design discussion in this session if picking it up later. The rounded
+  version already reads as chain-link-like once rendered with the pins and
+  bearings; revisit only if the flat-plate look turns out to matter.
+- **Skipped**: the standalone `chain-link-preview.html` isolation harness.
+  Iterating directly against the full loop turned out to be practical
+  (the assembly rendered correctly on the first real attempt), so the
+  harness wasn't needed this round — still an option if link-shape
+  iteration gets harder in a future pass.
+- [x] Tests ([test/chain.test.js](test/chain.test.js)): `createLinkGeometry`
+      rings match `loopRadius` at both ends and `waistRadius` (via slerped
+      mid-orientation) in the middle; `axialOffset` shifts the plate along
+      the local pin axis correctly; `createChainLinksGeometry` places two
+      plates per gap with the right alternating separation; `createChainGeometry`
+      produces the correctly-sized merged pins+bearings+links geometry.
+- [x] Bug found & fixed along the way: `BufferGeometryUtils.mergeGeometries`
+      requires every input geometry to have the same attribute set (so the
+      link geometry needed a `uv` attribute added, matching
+      `CylinderGeometry`'s pins/bearings) and to be uniformly indexed or
+      non-indexed (so pin/bearing `CylinderGeometry`s are now built with
+      `.toNonIndexed()`) — otherwise the final `mergeGeometries([pins,
+      bearings, links])` silently returns `null`.
+- [x] Visually verified (via a temporary local `python3 -m http.server`,
+      see `.claude/launch.json` — needed because this session's `file://`
+      preview cached an old copy of `chain.js` across reloads and briefly
+      looked like a real bug): the full loop renders as pins, bearings, and
+      tapered links forming a recognizable chain shape; `twist = 1` shows a
+      clean progressive twist around the loop; switching to and from other
+      styles still works with no regressions; STL export
+      (`STLExporter.parse`) succeeds against the merged multi-primitive
+      mesh. `npm test` — 24/24 passing.
 
 ### Phase 4 — parameters, UI, config persistence
-- [x] `linkCount` and `pinLength` controls landed early (Phase 1 follow-up).
-- [ ] Add controls for `pinRadius` (currently derived from the shared
-      "Slice Radius"/`polyRadius` control — may be worth breaking out on its
-      own once the bearing exists to size against it), `bearingRadius`,
-      `bearingLength`, inner/outer link width & thickness — following the
-      `data-style-owned` + `ownedControlIds` pattern
-      ([index.html](index.html), `modules/styles/*.js`).
-- [ ] Confirm [modules/config.js](modules/config.js) persists all the new
-      ids to the URL (`control_id_list` picks up `ownedControlIds`
-      automatically — double check `getConfig()` reads each new field).
-- [ ] Confirm STL export (`STLExporter`) works against the merged
-      multi-primitive mesh — may need an explicit geometry-merge step,
-      unlike the current single-sweep styles.
+- [x] `linkCount`, `pinLength`, `bearingRadius`, `bearingLength`,
+      `linkWaistRadius`, `linkInnerSeparation`, `linkOuterSeparation`
+      controls all landed alongside Phases 1–3 rather than being deferred.
+- [ ] `pinRadius` is still derived from the shared "Slice Radius"/`polyRadius`
+      control rather than its own control — may be worth breaking out on
+      its own now that the bearing/links exist to size against it.
+- [x] [modules/config.js](modules/config.js) persists every chain control
+      to the URL (`control_id_list` picks up `ownedControlIds`
+      automatically; `getConfig()` has a matching read for each field).
+- [x] STL export (`STLExporter.parse`) confirmed working against the merged
+      multi-primitive mesh (pins + bearings + links all merged into one
+      `BufferGeometry` up front in `createChainGeometry`, so export needed
+      no special-casing).
 
 ### Phase 5 — polish
 - [ ] Visual proportion check against reference chain photos.
