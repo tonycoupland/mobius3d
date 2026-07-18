@@ -1,4 +1,7 @@
-var control_id_list = ['geometryType', 'segments', 'polygonRadius', 'ringRadius', 'colour', 'sides', 'cornerSmoothing', 'ratio', 'twist'];
+import { STYLES } from './styles/index.js';
+
+const common_control_ids = ['geometryType', 'segments', 'polygonRadius', 'ringRadius', 'colour', 'twist'];
+var control_id_list = [...common_control_ids, ...new Set(STYLES.flatMap(style => style.ownedControlIds))];
 
 export function updateURLFromInputs() {
     const params = new URLSearchParams();

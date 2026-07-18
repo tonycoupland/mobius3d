@@ -87,17 +87,13 @@
     </select>
   </label>
   <label>Smoothness<input type="number" id="segments" value="36"></label>
-  <label>Polygon Corner Smoothing<input type="number" id="cornerSmoothing" value="20"></label>
+  <label>Polygon Corner Smoothing<input type="number" id="cornerSmoothing" value="20" data-style-owned></label>
   <h2>Shape</h2>
   <label>Style
-    <select id="geometryType">
-      <option value="polygon">Polygon</option>
-      <option value="rounded">Rounded Polygon</option>
-      <option value="rectangular">Rectangular</option>
-    </select>
+    <select id="geometryType"></select>
   </label>
-  <label>Polygon Sides<input type="number" id="sides" value="6"></label>
-  <label>Rectangle Ratio<input type="number" id="ratio" value="10" step="1"></label>
+  <label>Polygon Sides<input type="number" id="sides" value="6" data-style-owned></label>
+  <label>Rectangle Ratio<input type="number" id="ratio" value="10" step="1" data-style-owned></label>
   <label>Twist (sides)<input type="number" id="twist" value="5"></label>
 
   <button id="download">Download STL</button>
@@ -116,9 +112,18 @@
 <script type="module">
   import * as CONFIG from "./modules/config.js";
   import * as MOBIUS from './modules/mobius.js'
+  import { STYLES, getStyle } from './modules/styles/index.js'
   import * as THREE from 'three'
   import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
   import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+
+  const geometryTypeSelect = document.getElementById('geometryType');
+  STYLES.forEach(style => {
+    const option = document.createElement('option');
+    option.value = style.id;
+    option.textContent = style.label;
+    geometryTypeSelect.appendChild(option);
+  });
 
 
   const canvas = document.getElementById('three-canvas');
@@ -140,56 +145,21 @@
 
 
   function regenerate() {
-    var sides = parseInt(document.getElementById('sides').value);
-    const polyRadius = parseFloat(document.getElementById('polygonRadius').value);
-    const ringRadius = parseFloat(document.getElementById('ringRadius').value);
-    const segments = parseInt(document.getElementById('segments').value);
-    var twist = parseFloat(document.getElementById('twist').value);
-    const cornerSmoothing = parseFloat(document.getElementById('cornerSmoothing').value);
-    
     const config = CONFIG.getConfig();
+    const style = getStyle(config.geometryType);
 
     if (mesh) scene.remove(mesh);
 
-    // Enable/disable various controls depending on the type
-    document.getElementById('cornerSmoothing').disabled = (config.geometryType != 'rounded');
-    document.getElementById('ratio').disabled = (config.geometryType != 'rectangular');
-    document.getElementById('sides').disabled = (config.geometryType == 'rectangular');
+    // Enable/disable controls depending on which style owns them
+    document.querySelectorAll('#config [data-style-owned]').forEach(el => {
+      el.disabled = !style.ownedControlIds.includes(el.id);
+    });
 
-    // Scale twist variable depending on the style
-    switch (config.geometryType) {
-      case 'rectangular':
-        twist *= 2; 
-        sides = 2*config.ratio;
-        break;
+    const sides = style.resolveSides(config);
+    const twist = config.twist * style.twistScale(config);
+    const polygonFactory = style.createPointFactory(config);
 
-      case 'rounded' : 
-        twist *= 21; break;
-
-      case 'polygon':
-      default : 
-        twist *= 1; break;
-    }
-
-    // Create a factory so we can swap in new polygon models
-    //alert(config.geometryType);
-    const polygonFactory = (()=>{
-    switch (config.geometryType) {
-      case 'rectangular':
-        return MOBIUS.createPolygonPointsInRectangular;
-
-      case 'rounded' : 
-        const cornerRadius = config.cornerSmoothing/100 * config.polyRadius;
-        const cornerSegments = 20;
-        return function(s, r) { return MOBIUS.createRoundedPolygonPoints(s, r, cornerRadius, cornerSegments); } ;
-
-      case 'polygon':
-      default : 
-        return MOBIUS.createPolygonPoints;
-      }
-    })();
-
-    const geom = MOBIUS.generateGeometry(sides, polyRadius, ringRadius, segments, twist, polygonFactory);
+    const geom = MOBIUS.generateGeometry(sides, config.polyRadius, config.ringRadius, config.segments, twist, polygonFactory);
     const material = new THREE.MeshStandardMaterial({
       color: config.colour,
       flatShading: true,

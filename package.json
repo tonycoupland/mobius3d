@@ -1,0 +1,13 @@
+{
+  "name": "mobius3d",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Interactive generator for twisted-ring / Mobius-strip-style 3D objects. Test-only tooling; the app itself has no build step and loads three from a CDN.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "three": "^0.185.0"
+  }
+}
