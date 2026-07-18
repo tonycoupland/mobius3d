@@ -29,16 +29,19 @@ as we iterate.
 2. Links alternate like a real roller chain: a narrower "inner" pair and a
    wider "outer" pair, link-to-link around the loop.
 3. `linkCount` is a new, independent control, not tied to the existing
-   "Smoothness" (`segments`) input — `segments` controls sweep resolution for
-   the existing styles and has no equivalent meaning for a chain of discrete
-   stations, so it should be hidden/disabled when the chain style is active.
-   This exposes a gap in the current control-visibility mechanism: today
-   [modules/styles/index.js](modules/styles/index.js)'s `ownedControlIds`
-   only lets a style claim *exclusive* controls (`sides`, `ratio`,
-   `cornerSmoothing`) — there's no way for a style to opt out of a `common`
-   control (`segments`, `colour`, etc). Generalizing this now (rather than
-   special-casing chain) means any future style can hide controls that don't
-   apply to it too. See Phase 0.
+   "Smoothness" (`segments`) input.
+   **Revised after Phase 3 review**: originally `segments` was hidden for
+   chain (it has no sweep to resolve), which needed a small
+   `irrelevantCommonControlIds` generalization of the control-visibility
+   mechanism. Once the chain style had round pins/bearings/links, though,
+   `segments` turned out to have a perfectly good meaning after all — it's
+   now reused as the *radial* segment count for those round parts (how
+   many sides approximate the circle), wired straight into
+   `createChainGeometry`'s `radialSegments`. The `irrelevantCommonControlIds`
+   mechanism was removed again since no style needs it anymore; the "loads
+   of chain-only controls clutter every other style" problem it was
+   partly aimed at is instead solved by grouping all of chain's *owned*
+   controls into their own hideable "Bike Chain" section (see Phase 4).
 4. Twist reuses the existing "Twist (sides)" control. Working out the units:
    in [modules/mobius.js](modules/mobius.js):107-140, the *existing* styles
    have two separate counts — `segments` (sweep resolution, e.g. 36) and
@@ -223,10 +226,67 @@ as we iterate.
       (`STLExporter.parse`) succeeds against the merged multi-primitive
       mesh. `npm test` — 24/24 passing.
 
+### Phase 3 follow-up — round smoothness, link thickness, closing-gap fix ✅
+Four rounds of feedback after the first working render:
+
+- [x] **Smoothness controls roundness again.** Reused by the chain style as
+      `radialSegments` for pins/bearings/links (`createPinGeometry` /
+      `createBearingGeometry` / `createChainGeometry` all take an optional
+      `radialSegments` param, default 12, wired from `config.segments` in
+      [modules/styles/chainStyle.js](modules/styles/chainStyle.js)). This is
+      what prompted reverting Decision 3's "hide Smoothness" call and
+      removing the now-unused `irrelevantCommonControlIds` mechanism.
+- [x] **Added a Link Thickness control.** `createLinkGeometry`'s ring is now
+      an ellipse rather than a circle away from its coplanar ends: a "wide"
+      axis (local Y) still tapers from `loopRadius` to `waistRadius`, but a
+      separate "thin" axis (local Z) tapers from `loopRadius` down to
+      `linkThickness / 2`, flattening the neck into a plate-like cross
+      section instead of a round rod. Defaults `thickness` to
+      `waistRadius * 2` when omitted, which reproduces the old round shape
+      exactly (kept the existing round-waist tests passing unchanged).
+- [x] **New "Bike Chain" settings section.** All of chain's `ownedControlIds`
+      (`linkCount`, `pinLength`, `bearingRadius`, `bearingLength`,
+      `linkWaistRadius`, `linkThickness`, `linkInnerSeparation`,
+      `linkOuterSeparation`) now live together under one `<h2>Bike
+      Chain</h2>` inside a `<div id="chainControls">` in
+      [index.html](index.html), whose whole `display` is toggled in
+      `regenerate()` based on `style.id === 'chain'` — hidden entirely for
+      every other style instead of individually greyed out. Scoped to just
+      chain for now since it's the only style with "loads" of settings; not
+      generalized into a per-style-section mechanism until another style
+      actually needs one.
+- [x] **Fixed the closing-gap twist bug.** This was the same class of
+      problem `generateGeometry`'s `twisted_offset` already solves for the
+      sweep styles (Decision 4): `createChainLinksGeometry` was building the
+      last gap's link by slerping from `transforms[linkCount - 1]` to
+      `transforms[0]` directly, but `transforms[0]` represents *twist = 0*,
+      not "the last station's twist plus one more per-step delta" — so the
+      final link's orientation slerp was crossing almost the *entire*
+      accumulated twist in a single short span, instead of the same small
+      per-step delta every other link spans. Fixed with a new
+      `createClosingStationTransform(linkCount, ringRadius, twists)` that
+      computes the station transform at the continuous index `linkCount`
+      (not wrapped to 0): same position as station 0 (angle wraps to the
+      same point), but twist continues on past the last real station's
+      value instead of resetting. `createChainLinksGeometry` now uses this
+      for the final gap's `end` transform. Verified with a quaternion
+      `angleTo` test showing the closing gap's orientation delta now
+      matches every other gap's, where the old code's delta was more than
+      2x larger for a 180°-total-twist example.
+- [x] `npm test` — 29/29 passing. Visually verified via the local
+      `python3 -m http.server` harness: Smoothness re-enabled and visibly
+      rounds the pins/bearings/links; links read as flatter plates with the
+      default thickness; the "Bike Chain" section shows only when that
+      style is active and the panel is otherwise clean for the other
+      styles; a twist=1 loop shows no more visually "over-twisted" link
+      near the seam; STL export still succeeds.
+
 ### Phase 4 — parameters, UI, config persistence
 - [x] `linkCount`, `pinLength`, `bearingRadius`, `bearingLength`,
-      `linkWaistRadius`, `linkInnerSeparation`, `linkOuterSeparation`
-      controls all landed alongside Phases 1–3 rather than being deferred.
+      `linkWaistRadius`, `linkThickness`, `linkInnerSeparation`,
+      `linkOuterSeparation` controls all landed alongside Phases 1–3 rather
+      than being deferred, and are now grouped into their own hideable
+      section (see the Phase 3 follow-up above).
 - [ ] `pinRadius` is still derived from the shared "Slice Radius"/`polyRadius`
       control rather than its own control — may be worth breaking out on
       its own now that the bearing/links exist to size against it.
@@ -240,8 +300,6 @@ as we iterate.
 
 ### Phase 5 — polish
 - [ ] Visual proportion check against reference chain photos.
-- [ ] Decide whether `chain-link-preview.html` stays as a permanent dev tool
-      or gets deleted once Phase 3 is visually solid.
 - [ ] Update [README.md](README.md) / [CLAUDE.md](CLAUDE.md) once the new
       module/style shape has settled.
 

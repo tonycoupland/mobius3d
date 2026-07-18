@@ -67,12 +67,6 @@
   <h2>Size</h2>
   <label>Ring Radius (mm)<input type="number" id="ringRadius" value="40" step="1"></label>
   <label>Slice Radius (mm)<input type="number" id="polygonRadius" value="6" step="1"></label>
-  <label>Pin Length (mm)<input type="number" id="pinLength" value="9" step="0.5" data-style-owned></label>
-  <label>Bearing Radius (mm)<input type="number" id="bearingRadius" value="3" step="0.5" data-style-owned></label>
-  <label>Bearing Length (mm)<input type="number" id="bearingLength" value="6" step="0.5" data-style-owned></label>
-  <label>Link Waist Radius (mm)<input type="number" id="linkWaistRadius" value="1" step="0.25" data-style-owned></label>
-  <label>Link Inner Separation (mm)<input type="number" id="linkInnerSeparation" value="3" step="0.5" data-style-owned></label>
-  <label>Link Outer Separation (mm)<input type="number" id="linkOuterSeparation" value="6" step="0.5" data-style-owned></label>
 
   <h2>Appearance</h2>
   <label>Colour
@@ -92,7 +86,7 @@
       <option value="#32CD32" style="background:#32CD32;" selected>Grass Green</option>
     </select>
   </label>
-  <label>Smoothness<input type="number" id="segments" value="36" data-toggleable-common></label>
+  <label>Smoothness<input type="number" id="segments" value="36"></label>
   <label>Polygon Corner Smoothing<input type="number" id="cornerSmoothing" value="20" data-style-owned></label>
   <h2>Shape</h2>
   <label>Style
@@ -100,8 +94,19 @@
   </label>
   <label>Polygon Sides<input type="number" id="sides" value="6" data-style-owned></label>
   <label>Rectangle Ratio<input type="number" id="ratio" value="10" step="1" data-style-owned></label>
-  <label>Chain Links<input type="number" id="linkCount" value="24" step="1" data-style-owned></label>
   <label>Twist (sides)<input type="number" id="twist" value="5"></label>
+
+  <div id="chainControls">
+    <h2>Bike Chain</h2>
+    <label>Chain Links<input type="number" id="linkCount" value="24" step="1" data-style-owned></label>
+    <label>Pin Length (mm)<input type="number" id="pinLength" value="9" step="0.5" data-style-owned></label>
+    <label>Bearing Radius (mm)<input type="number" id="bearingRadius" value="3" step="0.5" data-style-owned></label>
+    <label>Bearing Length (mm)<input type="number" id="bearingLength" value="6" step="0.5" data-style-owned></label>
+    <label>Link Waist Radius (mm)<input type="number" id="linkWaistRadius" value="1" step="0.25" data-style-owned></label>
+    <label>Link Thickness (mm)<input type="number" id="linkThickness" value="1.5" step="0.25" data-style-owned></label>
+    <label>Link Inner Separation (mm)<input type="number" id="linkInnerSeparation" value="3" step="0.5" data-style-owned></label>
+    <label>Link Outer Separation (mm)<input type="number" id="linkOuterSeparation" value="6" step="0.5" data-style-owned></label>
+  </div>
 
   <button id="download">Download STL</button>
 </div>
@@ -162,12 +167,10 @@
     document.querySelectorAll('#config [data-style-owned]').forEach(el => {
       el.disabled = !style.ownedControlIds.includes(el.id);
     });
-    // Common controls that don't apply to every style (e.g. Smoothness has
-    // no meaning for the discrete chain style) get reset then re-disabled
-    // per the active style, so switching styles doesn't leave a stale state.
-    document.querySelectorAll('#config [data-toggleable-common]').forEach(el => {
-      el.disabled = (style.irrelevantCommonControlIds || []).includes(el.id);
-    });
+    // The chain style has enough of its own controls that greying them out
+    // still clutters every other style's panel, so its whole section is
+    // hidden rather than just disabled.
+    document.getElementById('chainControls').style.display = style.id === 'chain' ? '' : 'none';
 
     const geom = style.buildGeometry
       ? style.buildGeometry(config)

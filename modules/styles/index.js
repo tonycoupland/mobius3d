@@ -4,9 +4,6 @@
  * @property {string} label             - dropdown display name
  * @property {string[]} ownedControlIds - ids of #config inputs only this style uses
  *                                         (drives enable/disable and URL persistence)
- * @property {string[]} [irrelevantCommonControlIds]
- *     - ids of otherwise-common #config inputs (marked `data-toggleable-common`)
- *       that don't apply to this style and should be disabled while it's active
  * @property {(config: object) => number} [resolveSides]
  *     - actual polygon side count to pass into MOBIUS.generateGeometry
  *       (only needed by styles using the default sweep-based buildGeometry below)

@@ -3,8 +3,14 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import {
   createPinTransforms, createPinGeometry, createBearingGeometry,
-  createLinkGeometry, createChainLinksGeometry, createChainGeometry,
+  createClosingStationTransform, createLinkGeometry, createChainLinksGeometry, createChainGeometry,
 } from '../modules/chain.js';
+
+function orientationDelta(m1, m2) {
+  const q1 = new THREE.Quaternion().setFromRotationMatrix(m1);
+  const q2 = new THREE.Quaternion().setFromRotationMatrix(m2);
+  return q1.angleTo(q2);
+}
 
 function anyVertexNear(position, point, tolerance = 1e-4) {
   for (let i = 0; i < position.count; i++) {
@@ -93,12 +99,44 @@ test('twists = 0 closes the loop untwisted', () => {
   transforms.forEach(transform => assert.ok(Math.abs(transform.twist) < 1e-9));
 });
 
+test('createClosingStationTransform lands on station 0\'s position but continues the twist past it', () => {
+  const linkCount = 8;
+  const ringRadius = 40;
+  const twists = 1;
+  const transforms = createPinTransforms(linkCount, ringRadius, twists);
+  const closing = createClosingStationTransform(linkCount, ringRadius, twists);
+
+  // angle wraps to the same physical point as station 0 (cos/sin of 2*PI == of 0)
+  assert.ok(closing.position.distanceTo(transforms[0].position) < 1e-9);
+
+  // twist continues on by one more per-step delta past the last real
+  // station, rather than resetting to transforms[0].twist (0) -- this is
+  // what lets the closing gap span the same delta as every other gap
+  // instead of the whole accumulated twist (see createChainLinksGeometry).
+  const totalTwistRad = THREE.MathUtils.degToRad(180 * twists);
+  const perStepDelta = totalTwistRad / linkCount;
+  const expectedTwist = transforms[linkCount - 1].twist + perStepDelta;
+  assert.ok(Math.abs(closing.twist - expectedTwist) < 1e-9);
+});
+
 test('createPinGeometry produces one merged cylinder per link', () => {
   const linkCount = 5;
   const geom = createPinGeometry(1, 4, linkCount, 40, 0);
   const position = geom.getAttribute('position');
 
   const singleCylinder = new THREE.CylinderGeometry(1, 1, 4, 12).toNonIndexed();
+  const vertsPerCylinder = singleCylinder.getAttribute('position').count;
+
+  assert.equal(position.count, vertsPerCylinder * linkCount);
+});
+
+test('createPinGeometry accepts a radialSegments override, controlling how round it is', () => {
+  const linkCount = 3;
+  const radialSegments = 6;
+  const geom = createPinGeometry(1, 4, linkCount, 40, 0, radialSegments);
+  const position = geom.getAttribute('position');
+
+  const singleCylinder = new THREE.CylinderGeometry(1, 1, 4, radialSegments).toNonIndexed();
   const vertsPerCylinder = singleCylinder.getAttribute('position').count;
 
   assert.equal(position.count, vertsPerCylinder * linkCount);
@@ -173,6 +211,40 @@ test('createLinkGeometry wraps loopRadius around both end stations and pinches t
   }
 });
 
+test('createLinkGeometry thickness flattens the waist along local Z while its width stays at waistRadius', () => {
+  const start = { position: new THREE.Vector3(0, 0, 0), matrix: new THREE.Matrix4() };
+  const end = { position: new THREE.Vector3(0, 0, 10), matrix: new THREE.Matrix4() };
+  const loopRadius = 3;
+  const waistRadius = 1;
+  const thickness = 0.4;
+  const lengthSegments = 4;
+
+  const geom = createLinkGeometry(start, end, {
+    loopRadius, waistRadius, thickness, radialSegments: 8, lengthSegments,
+  });
+  const position = geom.getAttribute('position');
+  const midPosition = start.position.clone().lerp(end.position, 0.5);
+
+  // theta=0 -> local Y (the "wide" axis): still waistRadius
+  assert.ok(anyVertexNear(position, midPosition.clone().add(new THREE.Vector3(0, waistRadius, 0))));
+  // theta=pi/2 -> local Z (the "thin" axis): flattened to thickness/2
+  assert.ok(anyVertexNear(position, midPosition.clone().add(new THREE.Vector3(0, 0, thickness / 2))));
+  // and NOT still at waistRadius along Z, which would mean thickness had no effect
+  assert.ok(!anyVertexNear(position, midPosition.clone().add(new THREE.Vector3(0, 0, waistRadius)), 1e-2));
+});
+
+test('createLinkGeometry defaults thickness to waistRadius * 2, reproducing a round (non-flattened) waist', () => {
+  const start = { position: new THREE.Vector3(0, 0, 0), matrix: new THREE.Matrix4() };
+  const end = { position: new THREE.Vector3(0, 0, 10), matrix: new THREE.Matrix4() };
+  const waistRadius = 1;
+
+  const geom = createLinkGeometry(start, end, { loopRadius: 3, waistRadius, radialSegments: 8, lengthSegments: 4 });
+  const position = geom.getAttribute('position');
+  const midPosition = start.position.clone().lerp(end.position, 0.5);
+
+  assert.ok(anyVertexNear(position, midPosition.clone().add(new THREE.Vector3(0, 0, waistRadius))));
+});
+
 test('createLinkGeometry axialOffset shifts the whole plate along the local pin axis', () => {
   const start = { position: new THREE.Vector3(0, 0, 0), matrix: new THREE.Matrix4() };
   const end = { position: new THREE.Vector3(0, 0, 10), matrix: new THREE.Matrix4() };
@@ -225,6 +297,24 @@ test('createChainLinksGeometry places two plates per gap, alternating inner/oute
       assert.ok(found, `expected a loopRadius-distant vertex for gap ${i} plate ${plateIndex}`);
     });
   }
+});
+
+test('the closing gap spans the same twist delta as every other gap, not the whole accumulated twist', () => {
+  const linkCount = 6;
+  const ringRadius = 40;
+  const twists = 1; // 180 degrees total -- the old bug crammed nearly all of this into the last link
+
+  const transforms = createPinTransforms(linkCount, ringRadius, twists);
+  const closing = createClosingStationTransform(linkCount, ringRadius, twists);
+
+  const perStepGapDelta = orientationDelta(transforms[0].matrix, transforms[1].matrix);
+  const closingGapDelta = orientationDelta(transforms[linkCount - 1].matrix, closing.matrix);
+  assert.ok(Math.abs(closingGapDelta - perStepGapDelta) < 1e-9);
+
+  // sanity check: naively wrapping to transforms[0] (the old, buggy
+  // behaviour) gives a much larger delta for this twists value
+  const buggyDelta = orientationDelta(transforms[linkCount - 1].matrix, transforms[0].matrix);
+  assert.ok(buggyDelta > perStepGapDelta * 2);
 });
 
 test('createChainGeometry merges pins, bearings, and links, all sharing the same station transforms', () => {

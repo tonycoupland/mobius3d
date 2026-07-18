@@ -38,6 +38,7 @@ export function getConfig(){
     config["bearingRadius"] = parseFloat(document.getElementById('bearingRadius').value);
     config["bearingLength"] = parseFloat(document.getElementById('bearingLength').value);
     config["linkWaistRadius"] = parseFloat(document.getElementById('linkWaistRadius').value);
+    config["linkThickness"] = parseFloat(document.getElementById('linkThickness').value);
     config["linkInnerSeparation"] = parseFloat(document.getElementById('linkInnerSeparation').value);
     config["linkOuterSeparation"] = parseFloat(document.getElementById('linkOuterSeparation').value);
     config["colour"] = document.getElementById('colour').value;

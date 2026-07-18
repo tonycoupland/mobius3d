@@ -12,9 +12,8 @@ export const chainStyle = {
   label: 'Bike Chain',
   ownedControlIds: [
     'linkCount', 'pinLength', 'bearingRadius', 'bearingLength',
-    'linkWaistRadius', 'linkInnerSeparation', 'linkOuterSeparation',
+    'linkWaistRadius', 'linkThickness', 'linkInnerSeparation', 'linkOuterSeparation',
   ],
-  irrelevantCommonControlIds: ['segments'],
   buildGeometry: (config) => CHAIN.createChainGeometry({
     linkCount: config.linkCount,
     ringRadius: config.ringRadius,
@@ -24,7 +23,12 @@ export const chainStyle = {
     bearingRadius: config.bearingRadius,
     bearingLength: config.bearingLength,
     linkWaistRadius: config.linkWaistRadius,
+    linkThickness: config.linkThickness,
     linkInnerSeparation: config.linkInnerSeparation,
     linkOuterSeparation: config.linkOuterSeparation,
+    // Smoothness now also controls how round the pins/bearings/links are,
+    // rather than being hidden for this style (it used to be, before every
+    // style used it for something).
+    radialSegments: config.segments,
   }),
 };
