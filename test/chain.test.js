@@ -221,6 +221,34 @@ test('createLinkGeometry front/back rings wrap loopRadius around both end statio
   });
 });
 
+test('createLinkGeometry keeps a flat "doughnut" cap at loopRadius/start-orientation before the connector begins tapering', () => {
+  const start = { position: new THREE.Vector3(0, 0, 0), matrix: new THREE.Matrix4() };
+  const end = { position: new THREE.Vector3(0, 0, 10), matrix: new THREE.Matrix4().makeRotationX(Math.PI / 2) };
+  const loopRadius = 3;
+  const waistRadius = 1;
+  const radialSegments = 8;
+  const lengthSegments = 8;
+  const capFraction = 0.25;
+
+  const geom = createLinkGeometry(start, end, {
+    loopRadius, waistRadius, thickness: 0, radialSegments, lengthSegments, capFraction,
+  });
+  const position = geom.getAttribute('position');
+
+  // s = 1/8 = 0.125 is still inside the cap (capFraction = 0.25), so this
+  // ring should be identical to the s=0 ring: still loopRadius, and still
+  // exactly the start station's own orientation rather than already
+  // slerping toward the end station -- this is what keeps the link's end
+  // flush with the bearing instead of curving away from it immediately.
+  for (let j = 0; j < radialSegments; j++) {
+    const theta = (j / radialSegments) * 2 * Math.PI;
+    const expected = new THREE.Vector3(0, Math.cos(theta) * loopRadius, Math.sin(theta) * loopRadius)
+      .applyMatrix4(start.matrix)
+      .add(start.position);
+    assert.ok(anyVertexNear(position, expected), 'expected the cap region to stay flush with the start station');
+  }
+});
+
 test('createLinkGeometry thickness separates the front and back faces along the local pin axis, not the outline itself', () => {
   const start = { position: new THREE.Vector3(0, 0, 0), matrix: new THREE.Matrix4() };
   const end = { position: new THREE.Vector3(0, 0, 10), matrix: new THREE.Matrix4() };

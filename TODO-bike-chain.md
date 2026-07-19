@@ -297,16 +297,26 @@ Four rounds of feedback after the first working render:
       Fixed by setting `lengthSegments: radialSegments` in
       `createChainGeometry` — one Smoothness value now drives both the
       circular roundness and the taper's resolution.
-- [x] `npm test` — 30/30 passing. Visually verified via the local
-      `python3 -m http.server` harness: Smoothness re-enabled and visibly
-      rounds the pins/bearings *and* the link taper (checked at Smoothness
-      6 vs 64 — clearly faceted vs. clearly smooth); links read as genuine
-      flat plates with visible depth, and a bounding-box check confirmed
-      thickness actually grows the geometry's extent along the pin axis
-      (9.5mm → 12.5mm going from thickness 0.2 to 5); the "Bike Chain"
-      section shows only when that style is active; a twist=1 loop shows no
-      more visually "over-twisted" link near the seam; STL export still
-      succeeds.
+- [x] **Fixed a dent where the links meet the barrel — added a flat
+      "doughnut" cap.** Most visible with few links (e.g. `linkCount = 12`,
+      where each link spans a much wider gap): the taper from `loopRadius`
+      to `waistRadius` started at the very first length-step, so the
+      link's surface began curving away immediately instead of resting
+      flush against the bearing's flat end cap — the mismatched slope at
+      that junction read as a dent. Fixed by reparametrizing
+      `buildLinkFaceRings`'s sweep progress `s` through a `capFraction`
+      clamp (default `0.2`): for the first/last 20% of the length, the
+      remapped progress `u` stays clamped to exactly `0`/`1`, so radius
+      stays at `loopRadius` and orientation stays exactly the bearing's own
+      (no slerp yet) — a flat, non-tapering, non-rotating landing pad. All
+      of the taper and all of the twist happen in the "connector" — the
+      middle 60% — exactly as suggested: "doughnuts" at the ends,
+      "twists and angles adjusted" in the connector between them.
+- [x] `npm test` — 31/31 passing. Visually verified via the local
+      `python3 -m http.server` harness at `linkCount = 12` (where the dent
+      was most visible): the link's rounded end now sits flush on the
+      bearing like a washer, no visible pinch/crease at the junction; the
+      rest of the loop still renders correctly; STL export still succeeds.
 
 ### Phase 4 — parameters, UI, config persistence
 - [x] `linkCount`, `pinLength`, `bearingRadius`, `bearingLength`,

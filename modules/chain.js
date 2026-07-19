@@ -105,13 +105,25 @@ function slerpTransformMatrix(m1, m2, t) {
 // the local pin axis on top of `axialOffset`, used by createLinkGeometry to
 // build two parallel copies of this same outline (front/back faces) that
 // are actually `thickness` apart, instead of a zero-depth sheet.
-function buildLinkFaceRings(startTransform, endTransform, { loopRadius, waistRadius, axialOffset, xOffset, radialSegments, lengthSegments }) {
+//
+// The first/last `capFraction` of the length (progress `s`) is a flat
+// "doughnut" landing pad: radius stays at loopRadius and orientation stays
+// exactly the bearing's own, matching it flush instead of curving away
+// immediately. All of the taper (loopRadius -> waistRadius -> loopRadius)
+// and all of the twist (slerping from the start orientation to the end
+// orientation) happens in the "connector" between the two pads. Without
+// this, the taper starts at the very first step, so the surface meets the
+// bearing's flat end cap at a sharp angle instead of resting flush on it --
+// most visible as a dent right where each link meets its bearing when
+// there are few, widely-spaced links.
+function buildLinkFaceRings(startTransform, endTransform, { loopRadius, waistRadius, axialOffset, xOffset, radialSegments, lengthSegments, capFraction = 0.2 }) {
   const rings = [];
   for (let k = 0; k <= lengthSegments; k++) {
     const s = k / lengthSegments;
+    const u = THREE.MathUtils.clamp((s - capFraction) / (1 - 2 * capFraction), 0, 1);
 
-    const position = startTransform.position.clone().lerp(endTransform.position, s);
-    const orientation = slerpTransformMatrix(startTransform.matrix, endTransform.matrix, s);
+    const position = startTransform.position.clone().lerp(endTransform.position, u);
+    const orientation = slerpTransformMatrix(startTransform.matrix, endTransform.matrix, u);
 
     const totalOffset = axialOffset + xOffset;
     if (totalOffset !== 0) {
@@ -119,8 +131,9 @@ function buildLinkFaceRings(startTransform, endTransform, { loopRadius, waistRad
       position.add(axialShift);
     }
 
-    // linear taper: loopRadius at both ends (s=0, s=1), waistRadius at the middle
-    const radius = waistRadius + (loopRadius - waistRadius) * Math.abs(2 * s - 1);
+    // linear taper within the connector: loopRadius at u=0/1 (i.e. across
+    // the whole flat cap, since u is clamped there), waistRadius at u=0.5
+    const radius = waistRadius + (loopRadius - waistRadius) * Math.abs(2 * u - 1);
 
     const ring = [];
     for (let j = 0; j < radialSegments; j++) {
@@ -180,10 +193,11 @@ export function createLinkGeometry(startTransform, endTransform, options) {
     axialOffset = 0,
     radialSegments = 12,
     lengthSegments = 8,
+    capFraction = 0.2,
   } = options;
 
   const halfThickness = thickness / 2;
-  const ringOptions = { loopRadius, waistRadius, axialOffset, radialSegments, lengthSegments };
+  const ringOptions = { loopRadius, waistRadius, axialOffset, radialSegments, lengthSegments, capFraction };
   const frontRings = buildLinkFaceRings(startTransform, endTransform, { ...ringOptions, xOffset: -halfThickness });
   const backRings = buildLinkFaceRings(startTransform, endTransform, { ...ringOptions, xOffset: halfThickness });
 
